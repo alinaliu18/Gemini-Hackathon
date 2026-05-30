@@ -58,6 +58,8 @@ def evaluate_interview():
 
     temp_path = None
     try:
+        import time
+        start_time = time.time()
         goal = request.form.get('goal', 'General')
         sub_type = request.form.get('sub_type', 'Interview')
         user_response = request.form.get('text_input', '')
@@ -128,21 +130,23 @@ def evaluate_interview():
         raw_text = response.text
         clean_text = raw_text.replace('```json', '').replace('```', '').strip()
         ai_data = json.loads(clean_text)
-
+        latency_ms = int((time.time() - start_time) * 1000)
+        
         # ---------- CSV ----------
         log_file = os.path.join(os.path.dirname(__file__), 'eval_log.csv')
         file_exists = os.path.isfile(log_file)
         with open(log_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             if not file_exists:
-                writer.writerow(['timestamp', 'goal', 'sub_type', 'response_len', 'score', 'metrics_summary'])
+                writer.writerow(['timestamp', 'goal', 'sub_type', 'response_len', 'score', 'latency_ms', 'metrics_summary'])
             writer.writerow([
                 datetime.now().isoformat(),
                 goal,
                 sub_type,
                 len(user_response),
                 ai_data.get('score'),
-                json.dumps(ai_data.get('metrics', {}))[:200]   # 截断防止过长
+                latency_ms,
+                json.dumps(ai_data.get('metrics', {}))[:200]
             ])
         # ----------------------------------------
 
