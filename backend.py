@@ -45,7 +45,7 @@ def extract_text_from_pdf(pdf_file):
 def health_check():
     return jsonify({"status": "Backend is running!", "port": 5002})
 
-@app.route('/api/evaluate', methods=['POST', 'OPTIONS'])
+@app.route('/api/evaluate', methods=['POST', 'OPTIONS'])@app.route('/api/evaluate', methods=['POST', 'OPTIONS'])
 def evaluate_interview():
     if request.method == 'OPTIONS':
         return '', 200
@@ -63,11 +63,11 @@ def evaluate_interview():
         if uploaded_file:
             pdf_stream = io.BytesIO(uploaded_file.read())
             resume_content = extract_text_from_pdf(pdf_stream)
-       
+
         track_focus = {
-            "Academic": "Evaluate clarity of research explanation, logical structure, enthusiasm for field. Weight: clarity 40%, confidence 30%, professionalism 30%.",
-            "Social": "Evaluate friendliness, empathy, conversational flow, ability to connect. Weight: engagement 40%, tone 30%, pacing 30%.",
-            "Career": "Evaluate professionalism, relevant experience articulation, problem-solving demonstration. Weight: professionalism 40%, confidence 30%, clarity 30%."
+            "Academic": "Focus on clarity of research explanation, logical structure, enthusiasm. Weight: clarity 40%, confidence 30%, professionalism 30%.",
+            "Social": "Focus on friendliness, empathy, conversational flow. Weight: engagement 40%, tone 30%, pacing 30%.",
+            "Career": "Focus on professionalism, relevant experience, problem-solving. Weight: professionalism 40%, confidence 30%, clarity 30%."
         }
         focus_text = track_focus.get(goal, track_focus["Career"])
 
@@ -82,8 +82,7 @@ def evaluate_interview():
         1. Analyze the audio response based on the position requested.
         2. Evaluate speech patterns: pacing, tone, filler words, stutters.
         3. Assess other soft qualities: confidence, clarity, engagement, professionalism.
-        4. Assess other additional qualities based on the context and role provided. 
-        5. Provide a total score (0-100) and detailed evaluation.
+        4. Provide a total score (0-100) and detailed evaluation.
         Return ONLY a JSON object with this structure: 
         {{
           "score": 0-100,
@@ -112,18 +111,138 @@ def evaluate_interview():
             uploaded_audio = client.files.upload(file = temp_path, config = {'mime_type' : audio_response.mimetype})
             contents.append(uploaded_audio)
 
-        # 2. Correct syntax for the new SDK
         response = client.models.generate_content(
             model=MODEL_ID,
             contents=contents,
             config=genai.types.GenerateContentConfig(response_mime_type='application/json')
         )
         
-        # 3. Handle the response text
         raw_text = response.text
         clean_text = raw_text.replace('```json', '').replace('```', '').strip()
-        
         ai_data = json.loads(clean_text)
+
+        import csv
+        from datetime import datetime
+        log_file = 'eval_log.csv'
+        file_exists = os.path.isfile(log_file)
+        with open(log_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['timestamp', 'goal', 'sub_type', 'response_len', 'score', 'metrics_summary'])
+            writer.writerow([
+                datetime.now().isoformat(),
+                goal,
+                sub_type,
+                len(user_response),
+                ai_data.get('score'),
+                json.dumps(ai_data.get('metrics', {}))[:200]  # 防止过长
+            ])
+        # ----------------------------------------
+
+        return jsonify(ai_data)
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"score": 0, "evaluation": f"Backend Error: {str(e)}"}), 500
+    
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)@app.route('/api/evaluate', methods=['POST', 'OPTIONS'])
+def evaluate_interview():
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    temp_path = None
+    try:
+        goal = request.form.get('goal', 'General')
+        sub_type = request.form.get('sub_type', 'Interview')
+        user_response = request.form.get('text_input', '')
+        context_text = request.form.get('context_text', '')
+        audio_response = request.files.get('audio_response')
+
+        resume_content = "No resume provided."
+        uploaded_file = request.files.get('file')
+        if uploaded_file:
+            pdf_stream = io.BytesIO(uploaded_file.read())
+            resume_content = extract_text_from_pdf(pdf_stream)
+
+        # ---------- 个性化提示词（根据 track 调整评估重点）----------
+        track_focus = {
+            "Academic": "Focus on clarity of research explanation, logical structure, enthusiasm. Weight: clarity 40%, confidence 30%, professionalism 30%.",
+            "Social": "Focus on friendliness, empathy, conversational flow. Weight: engagement 40%, tone 30%, pacing 30%.",
+            "Career": "Focus on professionalism, relevant experience, problem-solving. Weight: professionalism 40%, confidence 30%, clarity 30%."
+        }
+        focus_text = track_focus.get(goal, track_focus["Career"])
+
+        prompt = f"""
+        You are an expert interview coach for {goal} ({sub_type}).
+        {focus_text}
+        RESUME: {resume_content}
+        CONTEXT/NOTES: {context_text}
+        USER RESPONSE: "{user_response}"
+        
+        TASK: 
+        1. Analyze the audio response based on the position requested.
+        2. Evaluate speech patterns: pacing, tone, filler words, stutters.
+        3. Assess other soft qualities: confidence, clarity, engagement, professionalism.
+        4. Provide a total score (0-100) and detailed evaluation.
+        Return ONLY a JSON object with this structure: 
+        {{
+          "score": 0-100,
+          "evaluation": "string",
+          "metrics": {{
+            "filler_word_count": "string",
+            "tone_analysis": "string",
+            "pacing": "string",
+            "confidence": "string",
+            "clarity": "string",
+            "stutters": "string",
+            "engagement": "string",
+            "professionalism": "string",
+            "additional_qualities": "string"
+          }}
+        }}
+        """
+        contents = [prompt]
+
+        if audio_response:
+            suffix = os.path.splitext(audio_response.filename)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio_file:
+                audio_response.save(temp_audio_file.name)
+                temp_path = temp_audio_file.name
+
+            uploaded_audio = client.files.upload(file = temp_path, config = {'mime_type' : audio_response.mimetype})
+            contents.append(uploaded_audio)
+
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=contents,
+            config=genai.types.GenerateContentConfig(response_mime_type='application/json')
+        )
+        
+        raw_text = response.text
+        clean_text = raw_text.replace('```json', '').replace('```', '').strip()
+        ai_data = json.loads(clean_text)
+
+        # ---------- 新增：写入 CSV 日志 ----------
+        import csv
+        from datetime import datetime
+        log_file = 'eval_log.csv'
+        file_exists = os.path.isfile(log_file)
+        with open(log_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['timestamp', 'goal', 'sub_type', 'response_len', 'score', 'metrics_summary'])
+            writer.writerow([
+                datetime.now().isoformat(),
+                goal,
+                sub_type,
+                len(user_response),
+                ai_data.get('score'),
+                json.dumps(ai_data.get('metrics', {}))[:200]  # 防止过长
+            ])
+        # ----------------------------------------
+
         return jsonify(ai_data)
 
     except Exception as e:
