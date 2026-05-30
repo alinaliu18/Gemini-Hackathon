@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google import genai  # Use the new SDK
 import tempfile
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Load .env file if it exists
 from pathlib import Path
