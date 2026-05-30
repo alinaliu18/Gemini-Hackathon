@@ -63,9 +63,17 @@ def evaluate_interview():
         if uploaded_file:
             pdf_stream = io.BytesIO(uploaded_file.read())
             resume_content = extract_text_from_pdf(pdf_stream)
+       
+        track_focus = {
+            "Academic": "Evaluate clarity of research explanation, logical structure, enthusiasm for field. Weight: clarity 40%, confidence 30%, professionalism 30%.",
+            "Social": "Evaluate friendliness, empathy, conversational flow, ability to connect. Weight: engagement 40%, tone 30%, pacing 30%.",
+            "Career": "Evaluate professionalism, relevant experience articulation, problem-solving demonstration. Weight: professionalism 40%, confidence 30%, clarity 30%."
+        }
+        focus_text = track_focus.get(goal, track_focus["Career"])
 
         prompt = f"""
         You are an expert interview coach for {goal} ({sub_type}).
+        {focus_text}
         RESUME: {resume_content}
         CONTEXT/NOTES: {context_text}
         USER RESPONSE: "{user_response}"
