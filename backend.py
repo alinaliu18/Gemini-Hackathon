@@ -124,7 +124,7 @@ def evaluate_interview():
 
         import csv
         from datetime import datetime
-        log_file = 'eval_log.csv'
+        log_file = os.path.join(os.path.dirname(__file__), 'eval_log.csv')
         file_exists = os.path.isfile(log_file)
         with open(log_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
