@@ -1,13 +1,14 @@
 # Interview Maestro
 
-An evidence-based interview practice tool. Record an answer, get feedback where every point points to a timestamp and a quote or a measured signal. Powered by gemini-2.5-flash (config in pipeline/config.py, fallbacks: gemini-flash-latest then gemini-2.5-flash-lite).
+An interview practice tool with a live voice interviewer. It asks about your resume, follows up on what you actually say, and gives a report where every point links to a timestamp and a quote or a measured signal. Scoring uses gemini-2.5-flash (fallbacks: gemini-flash-latest, then gemini-3.5-flash-lite); the interviewer uses gemini-3.8-live (config in pipeline/config.py).
 
 ![Home Page Hints](https://img.shields.io/badge/Status-Beta-purple) ![Monet Theme](https://img.shields.io/badge/Theme-Monet-orange)
 
 ## Features
 - Multi-track practice: Academic, Social, Career interview paths.
 - Evidence-based feedback: every item cites a timestamp plus a transcript quote or a measured signal.
-- Standalone camera practice page (`public/camera.html`); not yet a live, back-and-forth interviewer.
+- Live interview (main path): a spoken interview with Gemini Live. Questions come from your resume; the interviewer follows up on your answers; you can interrupt it.
+- Whole-interview report: an overall score plus feedback for each question.
 - Face signals measured in the browser; video never leaves the device.
 
 ## What problem this solves
@@ -41,6 +42,28 @@ Interpreted by Gemini: content, structure (STAR), clarity, presence.
 
 **Reliability.** 429 quota errors rotate to the next API key; 503 overload switches to a fallback model. SDK retries are capped so the user is not left waiting minutes. Audio is sent inline (no upload round trip) when under 15 MB.
 
+## Live interview
+
+**Why.** Realtime voice alone is now common (general assistants do it well). What this adds: questions grounded in your resume, follow-ups that probe what you just said ("what was YOUR part", "what was the number"), and a report built on measured evidence.
+
+**How.** The backend builds the interviewer's instructions from the resume and context, and mints a one-use ephemeral token (valid 30 min, session must start within 2 min) with the model and instructions locked in. The browser connects to the Live API WebSocket with that token, so the API key never reaches the browser and the instructions cannot be changed client-side. Mic audio is streamed as 16-bit PCM; the interviewer's voice comes back as 24 kHz PCM and is played in the page. Input and output transcription drive live captions. The interviewer is told never to score, praise or comment on feelings during the interview.
+
+**Turn-taking.** The interviewer treats 2.5 s of silence as the end of an answer (LIVE_SILENCE_MS). Longer thinking pauses can still make it start talking; when you continue speaking it stops (barge-in). Raise the value if it cuts people off.
+
+**Report.** Your mic is also recorded in the browser on the same clock as the session. After "End & get report", the recording, the interviewer's turns (with times) and the on-device camera numbers go to /api/session_report. Each answer (from the end of one question to the start of the next) is cut out and transcribed on its own, then scored with the same evidence pipeline. A separate pass produces the overall summary (overall score with coverage, top 2 strengths, top 2 improvements, each with timestamps). Eye contact and presence are shown only in the summary. A question the candidate talked over (interrupted) does not start a new answer.
+
+**Model choice** (one run each, same synthetic answer, via tests/live_smoke.py):
+
+| model | first question | next question after answer ends |
+|---|---|---|
+| gemini-3.8-live | 0.94 s | 2.86 s |
+| gemini-3.1-flash-live-preview | 0.56 s | 4.12 s |
+| gemini-2.5-flash-native-audio-latest | 3.75 s | 7.62 s |
+
+gemini-3.8-live was chosen for the fastest follow-up. Across 6 runs of gemini-3.8-live with ephemeral tokens, the opening question arrived 0.9-1.3 s after the session started and the next question 2.9-3.3 s after an answer ended. In 7 headless browser runs, the first caption appeared 2.4-3.5 s after clicking Start (including token and connection), and the session report took 32-64 s (it depends on Gemini load; one run used the fallback model).
+
+**Limits.** Audio-only Live sessions are capped at 15 minutes and a connection at about 10 minutes (no session resumption yet), so keep interviews under 10 minutes. Without headphones the interviewer's voice can leak into the mic; echo cancellation is on and leaked interviewer speech is filtered from the report by timing, but headphones are recommended. Video is never sent to Gemini: it stays on the device (this also keeps the session on the 15-minute audio-only limit instead of 2 minutes for audio+video).
+
 ## Testing and evaluation
 
 ```bash
@@ -50,6 +73,9 @@ Interpreted by Gemini: content, structure (STAR), clarity, presence.
 ./.venv/bin/python tests/e2e_smoke.py        # real Gemini calls, uses tests/fixtures
 node src/signals/aggregate.test.mjs
 node src/signals/faceSignals.test.mjs
+./.venv/bin/python tests/test_session.py     # offline: splitting a live session into answers
+./.venv/bin/python tests/live_smoke.py       # real Live API: token route -> interview -> follow-ups -> session report
+node src/live/liveSession.test.mjs
 ./.venv/bin/python eval/run_eval.py --selftest   # offline
 ./.venv/bin/python eval/run_eval.py --sample     # real API; see eval/README.md for adding human-rated recordings
 ```
@@ -58,18 +84,22 @@ Current results:
 - eval --sample on the two synthetic fixtures: 5/5 rule checks PASS; end-to-end latency 25-31 s per answer.
 - A browser-recorded answer replayed against the backend (with camera signals): 33-46 s end to end. The full browser flow (record -> upload -> results page with clickable timestamps) was run headless with a simulated mic/camera.
 - Transcription with inline audio: 4-10 s.
+- Live interview, headless browser with a simulated mic/camera: interviewer questions grounded in the synthetic resume, follow-ups quoting the answer, voice played in the page, report rendered with clickable timestamps.
 
 ## Known limitations
 
 - Gemini transcription sometimes drops filler words despite instructions, so fillers can be undercounted.
 - "Eye contact" is head pose (facing the camera), not true eye tracking.
 - No human-rated recordings yet, so agreement with human scores (MAE) has not been measured; thresholds and weights in pipeline/config.py are initial assumptions to calibrate.
-- Feedback takes about 30 s per answer.
+- The live interview has only been tested with a simulated mic and camera (this build environment cannot open real devices). Test it with a real mic and headphones before a demo.
+- Safari may block audio that starts after the network calls; tested in Chrome only.
+- Long thinking pauses (over 2.5 s) can make the interviewer start talking; it stops when you continue.
+- Feedback takes about 30 s per answer; a whole-interview report took 32-64 s in tests.
 - The test fixtures are synthetic (macOS text-to-speech), not real candidates.
 
 ## Credits
 
-The original camera/live-interview prototype (public/camera.html) was built by a teammate during the hackathon; the evidence-based pipeline was added in the multimodal-upgrade branch.
+The original camera/live-interview prototype (public/camera.html) was built by a teammate during the hackathon; the evidence-based pipeline was added in the multimodal-upgrade branch. The live interviewer and whole-interview report were added in the live-interviewer branch.
 
 ## 🚀 Getting Started
 

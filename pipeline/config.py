@@ -1,7 +1,9 @@
 """Tunable thresholds and weights. Initial values are assumptions: calibrate them against human-rated samples (eval/)."""
 
 MODEL_ID = "gemini-2.5-flash"
-FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash-lite"]  # tried in order when a model is overloaded (503)
+FALLBACK_MODELS = ["gemini-flash-latest", "gemini-3.5-flash-lite"]  # tried in order when a model is overloaded (503) or retired (404)
+LIVE_MODEL = "gemini-3.8-live"  # realtime voice interviewer (Live API)
+LIVE_SILENCE_MS = 2500     # silence before the interviewer treats an answer as finished; raise if it cuts people off while thinking
 
 # Audio
 MIN_PAUSE_S = 1.5          # silence at least this long counts as a pause

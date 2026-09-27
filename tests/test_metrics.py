@@ -59,4 +59,8 @@ expected_wc = len(re.findall(r"[A-Za-z']+|[一-鿿]",
                              " ".join(s["text"] for s in segments)))
 assert t["word_count"] == expected_wc, (t["word_count"], expected_wc)
 
+from pipeline.transcribe import to_seconds
+assert to_seconds("00:45") == 45 and to_seconds("01:07") == 67 and to_seconds("1:02:03") == 3723
+assert to_seconds("00:04.5") == 4.5 and to_seconds(12.3) == 12.3
+
 print("ALL OK")

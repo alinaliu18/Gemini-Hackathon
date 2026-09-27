@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import EvidenceFeedback from './components/EvidenceFeedback';
+import LiveInterview from './components/LiveInterview';
+import SessionReport from './components/SessionReport';
 import { createFaceSignalTracker } from './signals/faceSignals';
 import { aggregateSignals } from './signals/aggregate';
 
@@ -21,6 +23,7 @@ function App() {
   const [cameraOn, setCameraOn] = useState(true);
   const [videoSignals, setVideoSignals] = useState(null);
   const [evaluation, setEvaluation] = useState(null);
+  const [session, setSession] = useState(null); // {report, audioURL} from a live interview
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -424,28 +427,29 @@ function App() {
           
           <main className="app-container">
             <div className="mode-cards">
+              <div className="mode-card featured" onClick={() => setCurrentStep(6)}>
+                <div className="featured-badge">Recommended</div>
+                <div className="mode-icon">🎙️</div>
+                <h3>Live Interview</h3>
+                <p>A spoken interview that asks about your resume and follows up on what you actually say</p>
+                <ul className="mode-features">
+                  <li>✓ Questions from your resume</li>
+                  <li>✓ Follow-ups, interruptions, real back-and-forth</li>
+                  <li>✓ Whole-interview report with evidence</li>
+                </ul>
+                <button className="mode-btn">Start Live Interview</button>
+              </div>
+
               <div className="mode-card" onClick={() => setCurrentStep(4)}>
                 <div className="mode-icon">🎤</div>
                 <h3>Quick Practice</h3>
-                <p>Record your answer and get instant AI feedback</p>
+                <p>Answer one question by voice or text and get feedback</p>
                 <ul className="mode-features">
                   <li>✓ Audio or text response</li>
-                  <li>✓ Instant evaluation</li>
-                  <li>✓ Detailed feedback</li>
+                  <li>✓ Feedback tied to timestamps</li>
+                  <li>✓ Good for drilling one answer</li>
                 </ul>
                 <button className="mode-btn">Start Quick Practice</button>
-              </div>
-              
-              <div className="mode-card featured" onClick={() => window.location.href = '/camera.html'}>
-                <div className="featured-badge">Recommended</div>
-                <div className="mode-icon">📹</div>
-                <h3>Live Interview</h3>
-                <p>Full simulation with video, audio, and real-time transcription</p>
-                <ul className="mode-features">
-                  <li>✓ Video recording</li>
-                  <li>✓ Real-time transcription</li>
-                  <li>✓ Body language tips</li>
-                </ul>
               </div>
             </div>
             
@@ -458,9 +462,9 @@ function App() {
               </button>
               <button 
                 className="btn btn-submit"
-                onClick={() => setCurrentStep(4)}
+                onClick={() => setCurrentStep(6)}
               >
-                Quick Practice →
+                Live Interview →
               </button>
             </div>
           </main>
@@ -602,7 +606,7 @@ function App() {
                   type="button"
                   onClick={() => {
                     setEvaluation(null);
-                    window.location.href = '/camera.html';
+                    setCurrentStep(6);
                   }}
                   className="btn btn-live"
                 >
@@ -620,6 +624,35 @@ function App() {
                 </button>
               </div>
             </section>
+          </main>
+        </>
+      )}
+      {/* ==================== STEP 6: LIVE INTERVIEW ==================== */}
+      {currentStep === 6 && (
+        <>
+          <header className="app-header step-header">
+            <h1>Live Interview</h1>
+            <p className="subtitle">Talk it through like the real thing. Interrupt, ask to repeat, take your time.</p>
+          </header>
+          <main className="app-container">
+            <LiveInterview apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText} resumeFile={resumeFile}
+                           onBack={() => setCurrentStep(3)}
+                           onReport={(report, audioURL) => { setSession({ report, audioURL }); setCurrentStep(7); }} />
+          </main>
+        </>
+      )}
+
+      {/* ==================== STEP 7: INTERVIEW REPORT ==================== */}
+      {currentStep === 7 && session && (
+        <>
+          <header className="app-header step-header">
+            <h1>📊 Your Interview Report</h1>
+            <p className="subtitle">Every point links to the moment it is based on</p>
+          </header>
+          <main className="app-container">
+            <SessionReport report={session.report} audioURL={session.audioURL}
+                           onRestart={() => { setSession(null); setCurrentStep(6); }}
+                           onHome={() => { setSession(null); setCurrentStep(0); }} />
           </main>
         </>
       )}

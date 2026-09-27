@@ -18,6 +18,8 @@ from pipeline.audio_metrics import analyze_audio
 from pipeline.text_metrics import analyze_text
 from pipeline.transcribe import transcribe
 from pipeline.interpret import interpret, mmss
+from pipeline.live import system_instruction, mint_token
+from pipeline.session import session_report
 
 # ---------- load .env ----------
 env_path = Path(__file__).parent / '.env'
@@ -39,10 +41,11 @@ if not API_KEYS[0]:
 # The SDK's default retry backs off for ~2 min on 503; retry once, then let with_client switch model.
 CLIENTS = [genai.Client(api_key=k, http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=2)))
            for k in API_KEYS]
+TOKEN_CLIENTS = [genai.Client(api_key=k, http_options={'api_version': 'v1alpha'}) for k in API_KEYS]  # tokens are v1alpha-only
 
 
 def with_client(fn):
-    """Return (fn(client, model), model). 429 quota -> next key; 503 overload -> next model."""
+    """Return (fn(client, model), model). 429 quota -> next key; 503 overload / 404 retired model -> next model."""
     last = None
     for model in [config.MODEL_ID, *config.FALLBACK_MODELS]:
         for client in CLIENTS:
@@ -53,11 +56,28 @@ def with_client(fn):
                 if '429' in msg or 'RESOURCE_EXHAUSTED' in msg:
                     last = e
                     continue
-                if '503' in msg or 'UNAVAILABLE' in msg:
+                if '503' in msg or 'UNAVAILABLE' in msg or '404' in msg or 'NOT_FOUND' in msg:  # overloaded or retired model
                     last = e
                     break
                 raise
     raise last
+
+
+def save_and_measure(audio, timings):
+    """Save the uploaded recording and measure it. Returns (temp_path, audio_metrics)."""
+    suffix = os.path.splitext(audio.filename or '')[1] or '.webm'
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
+        audio.save(f.name)
+        temp_path = f.name
+    t = time.time()
+    audio_m = analyze_audio(temp_path, config.MIN_PAUSE_S, config.SILENCE_DB, config.SNR_THRESHOLD_DB)
+    timings['audio_metrics_ms'] = int((time.time() - t) * 1000)
+    return temp_path, audio_m
+
+
+def read_resume():
+    f = request.files.get('file')
+    return extract_text_from_pdf(io.BytesIO(f.read())) if f else ""
 
 
 def extract_text_from_pdf(pdf_file):
@@ -108,18 +128,10 @@ def evaluate_interview():
         audio = request.files.get('audio_response')
         video = json.loads(request.form['video_signals']) if request.form.get('video_signals') else None
 
-        resume = "No resume provided."
-        if request.files.get('file'):
-            resume = extract_text_from_pdf(io.BytesIO(request.files['file'].read()))
+        resume = read_resume() or "No resume provided."
 
         if audio:
-            suffix = os.path.splitext(audio.filename or '')[1] or '.webm'
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
-                audio.save(f.name)
-                temp_path = f.name
-            t = time.time()
-            audio_m = analyze_audio(temp_path, config.MIN_PAUSE_S, config.SILENCE_DB, config.SNR_THRESHOLD_DB)
-            timings['audio_metrics_ms'] = int((time.time() - t) * 1000)
+            temp_path, audio_m = save_and_measure(audio, timings)
             t = time.time()
             segments, timings['transcribe_model'] = with_client(
                 lambda c, m: transcribe(c, m, temp_path, audio.mimetype or 'audio/webm'))
@@ -147,6 +159,54 @@ def evaluate_interview():
     except Exception as e:
         app.logger.exception("evaluate failed")
         return jsonify({"score": 0, "evaluation": f"Backend Error: {e}", "metrics": {}}), 500
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+@app.route('/api/live/token', methods=['POST'])
+def live_token():
+    """Mint a one-use Live API token with the interviewer's instructions (built from the resume) locked in."""
+    goal = (request.form.get('goal') or 'Career').strip().capitalize()
+    instruction = system_instruction(goal, read_resume(), request.form.get('context_text', ''))
+    last = None
+    for client in TOKEN_CLIENTS:
+        try:
+            return jsonify({"token": mint_token(client, config.LIVE_MODEL, instruction), "model": config.LIVE_MODEL})
+        except Exception as e:
+            if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+                last = e
+                continue
+            app.logger.exception("token failed")
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"error": str(last)}), 429
+
+
+@app.route('/api/session_report', methods=['POST'])
+def session_report_route():
+    """Report for a whole live interview: the candidate's recording + the interviewer's turns (+ on-device video numbers)."""
+    temp_path = None
+    timings = {}
+    try:
+        t0 = time.time()
+        goal = (request.form.get('goal') or 'Career').strip().capitalize()
+        turns = json.loads(request.form.get('turns') or '[]')
+        video = json.loads(request.form['video_signals']) if request.form.get('video_signals') else None
+        audio = request.files.get('audio_response')
+        if not audio:
+            return jsonify({"error": "No recording uploaded."}), 400
+        temp_path, audio_m = save_and_measure(audio, timings)
+        t = time.time()
+        report = session_report(with_client, goal, request.form.get('context_text', ''), read_resume() or "No resume provided.",
+                                temp_path, turns, audio_m, video, analyze_text)
+        timings['report_ms'] = int((time.time() - t) * 1000)
+        timings['total_ms'] = int((time.time() - t0) * 1000)
+        report.update({"transcript": [{**s, "t": mmss(s["start"])} for s in report.pop("segments")], "turns": turns,
+                       "signals": {"audio": audio_m, "video": video}, "timings": timings})
+        return jsonify(report)
+    except Exception as e:
+        app.logger.exception("session report failed")
+        return jsonify({"error": f"Backend Error: {e}"}), 500
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)

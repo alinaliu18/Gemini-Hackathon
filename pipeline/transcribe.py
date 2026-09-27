@@ -9,8 +9,19 @@ INLINE_LIMIT = 15 * 1024 * 1024  # Gemini takes up to 20 MB of inline data per r
 PROMPT = """Transcribe this interview answer VERBATIM.
 - Keep every filler word exactly as spoken (um, uh, like, you know, 嗯, 呃). Do not clean up grammar.
 - Split into segments at sentence boundaries, each at most ~10 seconds.
-- Timestamps are seconds from the start of the audio (floats).
-Return ONLY a JSON array: [{"start": 0.0, "end": 4.2, "text": "..."}]. If there is no speech, return []."""
+- Timestamps are strings in MM:SS format from the start of the audio (e.g. "01:07" is 67 seconds in).
+Return ONLY a JSON array: [{"start": "00:00", "end": "00:04", "text": "..."}]. If there is no speech, return []."""
+
+
+def to_seconds(ts):
+    """ "MM:SS", "H:MM:SS" or "MM:SS.s" -> seconds. Plain numbers are taken as seconds.
+    (Asked for as MM:SS because Gemini, left to write floats, sometimes writes 0.45 meaning 0:45.)"""
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    secs = 0.0
+    for part in str(ts).strip().split(":"):
+        secs = secs * 60 + float(part)
+    return secs
 
 
 def transcribe(client, model, audio_path, mime_type):
@@ -27,7 +38,7 @@ def transcribe(client, model, audio_path, mime_type):
     segs = []
     for s in raw if isinstance(raw, list) else []:
         try:
-            start, end, text = float(s["start"]), float(s["end"]), str(s["text"]).strip()
+            start, end, text = to_seconds(s["start"]), to_seconds(s["end"]), str(s["text"]).strip()
         except (KeyError, TypeError, ValueError):
             continue
         if text and end >= start >= 0:

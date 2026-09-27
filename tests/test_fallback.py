@@ -23,4 +23,12 @@ try:
     raise AssertionError("other errors must not be swallowed")
 except ValueError:
     pass
+calls.clear()
+def retired(client, model):
+    calls.append(model)
+    if model != config.FALLBACK_MODELS[-1]:
+        raise RuntimeError("404 NOT_FOUND model is no longer available")
+    return "ok"
+assert backend.with_client(retired) == ("ok", config.FALLBACK_MODELS[-1]) and len(set(calls)) == 1 + len(config.FALLBACK_MODELS)
+
 print("ALL OK")
