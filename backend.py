@@ -11,6 +11,7 @@ import PyPDF2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google import genai
+from google.genai import types
 
 from pipeline import config
 from pipeline.audio_metrics import analyze_audio
@@ -30,25 +31,32 @@ if env_path.exists():
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
 
-# ---------- Gemini (rotate keys when one hits its quota) ----------
+# ---------- Gemini (rotate keys on quota errors, fall back to another model on overload) ----------
 API_KEYS = [k for k in os.environ.get('GEMINI_API_KEYS', '').split(',') if k] or \
            [os.environ.get('GEMINI_API_KEY', '')]
 if not API_KEYS[0]:
     raise ValueError("Set GEMINI_API_KEY (or GEMINI_API_KEYS=key1,key2) in .env")
-CLIENTS = [genai.Client(api_key=k) for k in API_KEYS]
+# The SDK's default retry backs off for ~2 min on 503; retry once, then let with_client switch model.
+CLIENTS = [genai.Client(api_key=k, http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=2)))
+           for k in API_KEYS]
 
 
 def with_client(fn):
-    """Call fn(client), moving to the next key only on quota / rate-limit errors."""
+    """Return (fn(client, model), model). 429 quota -> next key; 503 overload -> next model."""
     last = None
-    for client in CLIENTS:
-        try:
-            return fn(client)
-        except Exception as e:  # google-genai raises APIError subclasses; match on the status text
-            if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
-                last = e
-                continue
-            raise
+    for model in [config.MODEL_ID, *config.FALLBACK_MODELS]:
+        for client in CLIENTS:
+            try:
+                return fn(client, model), model
+            except Exception as e:  # google-genai raises APIError subclasses; match on the status text
+                msg = str(e)
+                if '429' in msg or 'RESOURCE_EXHAUSTED' in msg:
+                    last = e
+                    continue
+                if '503' in msg or 'UNAVAILABLE' in msg:
+                    last = e
+                    break
+                raise
     raise last
 
 
@@ -94,7 +102,7 @@ def evaluate_interview():
     timings = {}
     try:
         t0 = time.time()
-        goal = request.form.get('goal', 'Career')
+        goal = (request.form.get('goal') or 'Career').strip().capitalize()  # UI sends 'career'; config keys are 'Career'
         question = request.form.get('question', '') or request.form.get('context_text', '')
         typed = request.form.get('text_input', '')
         audio = request.files.get('audio_response')
@@ -113,7 +121,8 @@ def evaluate_interview():
             audio_m = analyze_audio(temp_path, config.MIN_PAUSE_S, config.SILENCE_DB, config.SNR_THRESHOLD_DB)
             timings['audio_metrics_ms'] = int((time.time() - t) * 1000)
             t = time.time()
-            segments = with_client(lambda c: transcribe(c, config.MODEL_ID, temp_path, audio.mimetype or 'audio/webm'))
+            segments, timings['transcribe_model'] = with_client(
+                lambda c, m: transcribe(c, m, temp_path, audio.mimetype or 'audio/webm'))
             timings['transcribe_ms'] = int((time.time() - t) * 1000)
         else:
             audio_m = NO_AUDIO
@@ -124,7 +133,8 @@ def evaluate_interview():
         # In noisy audio silence detection fails, so speech time is unknown: fall back to transcript timestamps.
         text_m = analyze_text(segments, None if audio_m["noisy"] else (audio_m["speech_s"] or None))
         t = time.time()
-        result = with_client(lambda c: interpret(c, config.MODEL_ID, question, goal, resume, segments, audio_m, text_m, video))
+        result, timings['interpret_model'] = with_client(
+            lambda c, m: interpret(c, m, question, goal, resume, segments, audio_m, text_m, video))
         timings['interpret_ms'] = int((time.time() - t) * 1000)
         timings['total_ms'] = int((time.time() - t0) * 1000)
 
@@ -135,7 +145,7 @@ def evaluate_interview():
         log_run(goal, result, timings)
         return jsonify(result)
     except Exception as e:
-        print(f"Error: {e}")
+        app.logger.exception("evaluate failed")
         return jsonify({"score": 0, "evaluation": f"Backend Error: {e}", "metrics": {}}), 500
     finally:
         if temp_path and os.path.exists(temp_path):

@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
+import EvidenceFeedback from './components/EvidenceFeedback';
+import { createFaceSignalTracker } from './signals/faceSignals';
+import { aggregateSignals } from './signals/aggregate';
 
 function App() {
   // Page navigation state
@@ -15,11 +18,17 @@ function App() {
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioURL, setAudioURL] = useState(null);
   
+  const [cameraOn, setCameraOn] = useState(true);
+  const [videoSignals, setVideoSignals] = useState(null);
   const [evaluation, setEvaluation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const mediaRecorderRef = React.useRef(null);
+  const streamRef = useRef(null);
+  const trackerRef = useRef(null);
+  const videoRef = useRef(null);
+  const playbackRef = useRef(null);
   const cardsRef = useRef(null);
   const API_BASE_URL = 'http://localhost:5002';
 
@@ -46,36 +55,70 @@ function App() {
   }, [currentStep]);
 
   const startRecording = async () => {
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      const audioChunks = [];
-
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.push(event.data);
-        }
-      };
-
-      mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-        setAudioBlob(audioBlob);
-        setAudioURL(URL.createObjectURL(audioBlob));
-      };
-
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      setError(null);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: cameraOn });
     } catch (err) {
-      console.error('Error accessing microphone:', err);
-      setError('Could not access microphone. Please check permissions.');
+      if (!cameraOn) {
+        console.error('Error accessing microphone:', err);
+        setError('Could not access microphone. Please check permissions.');
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });  // camera refused: still record audio
+        setCameraOn(false);
+      } catch (err2) {
+        console.error('Error accessing microphone:', err2);
+        setError('Could not access microphone. Please check permissions.');
+        return;
+      }
+    }
+    streamRef.current = stream;
+    setVideoSignals(null);
+
+    // Only audio is recorded and uploaded; video stays on this device.
+    mediaRecorderRef.current = new MediaRecorder(new MediaStream(stream.getAudioTracks()));
+    const audioChunks = [];
+    mediaRecorderRef.current.ondataavailable = (event) => {
+      if (event.data.size > 0) audioChunks.push(event.data);
+    };
+    mediaRecorderRef.current.onstop = () => {
+      const type = mediaRecorderRef.current.mimeType || 'audio/webm';
+      const blob = new Blob(audioChunks, { type });
+      setAudioBlob(blob);
+      setAudioURL(URL.createObjectURL(blob));
+    };
+    mediaRecorderRef.current.start();
+    setIsRecording(true);
+    setError(null);
+
+    if (stream.getVideoTracks().length && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play().catch(() => {});
+      trackerRef.current = await createFaceSignalTracker(videoRef.current);
+      trackerRef.current?.start();
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+    if (!mediaRecorderRef.current || !isRecording) return;
+    mediaRecorderRef.current.stop();
+    setIsRecording(false);
+    if (trackerRef.current) {
+      const samples = trackerRef.current.stop();
+      trackerRef.current = null;
+      if (samples.length) setVideoSignals(aggregateSignals(samples));
+    }
+    streamRef.current?.getTracks().forEach((tr) => tr.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  // Jump the answer playback to an "m:ss" timestamp from the feedback.
+  const seekTo = (mmss) => {
+    const [m, s] = String(mmss).split(':').map(Number);
+    if (playbackRef.current && !Number.isNaN(m) && !Number.isNaN(s)) {
+      playbackRef.current.currentTime = m * 60 + s;
+      playbackRef.current.play().catch(() => {});
     }
   };
 
@@ -112,13 +155,16 @@ function App() {
       formData.append('sub_type', 'Interview');
       formData.append('text_input', textInput);
       formData.append('context_text', contextText);
+      formData.append('question', contextText);
+      if (videoSignals) formData.append('video_signals', JSON.stringify(videoSignals));
 
       if (resumeFile) {
         formData.append('file', resumeFile);
       }
 
       if (audioBlob) {
-        formData.append('audio_response', audioBlob, 'audio.wav');
+        const ext = audioBlob.type.includes('mp4') ? 'm4a' : audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
+        formData.append('audio_response', audioBlob, `answer.${ext}`);
       }
 
       const response = await fetch(`${API_BASE_URL}/api/evaluate`, {
@@ -137,10 +183,6 @@ function App() {
       const data = await response.json();
       setEvaluation(data);
       
-      // Clear form on success
-      setTextInput('');
-      setAudioBlob(null);
-      setAudioURL(null);
     } catch (err) {
       console.error('Submission error:', err);
       setError(`Failed to evaluate: ${err.message}`);
@@ -439,6 +481,17 @@ function App() {
               <div className="response-section">
                 <div className="audio-section">
                   <h3>🎤 Record Your Answer</h3>
+                  <div className="camera-panel">
+                    <label>
+                      <input type="checkbox" checked={cameraOn} disabled={isRecording}
+                             onChange={(e) => setCameraOn(e.target.checked)} /> Use camera for eye contact &amp; presence
+                    </label>
+                    <video ref={videoRef} className="camera-preview" muted playsInline hidden={!isRecording || !cameraOn} />
+                    {cameraOn && <p className="camera-note">Analysed on your device. Video is never uploaded; only numbers like "eye contact 72%" are sent.</p>}
+                    {videoSignals && !isRecording && (
+                      <p className="camera-note">Captured: face in frame {Math.round(videoSignals.face_present_ratio * 100)}%, facing camera {Math.round(videoSignals.eye_contact_ratio * 100)}%.</p>
+                    )}
+                  </div>
                   <div className="recording-area">
                     {!isRecording ? (
                       <button 
@@ -522,26 +575,13 @@ function App() {
                 </div>
               </div>
 
-              <div className="evaluation-text">
-                <h3>Detailed Feedback</h3>
-                <p>{evaluation.evaluation}</p>
-              </div>
-
-              {evaluation.metrics && (
-                <div className="metrics-grid">
-                  <h3>Performance Metrics</h3>
-                  <div className="metrics-list">
-                    {Object.entries(evaluation.metrics).map(([key, value]) => (
-                      <div key={key} className="metric-item">
-                        <span className="metric-label">
-                          {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                        </span>
-                        <span className="metric-value">{value}</span>
-                      </div>
-                    ))}
-                  </div>
+              {audioURL && (
+                <div className="audio-playback">
+                  <audio ref={playbackRef} src={audioURL} controls className="audio-player" />
                 </div>
               )}
+
+              <EvidenceFeedback result={evaluation} onSeek={seekTo} />
 
               <div className="result-actions">
                 <button 
@@ -551,6 +591,7 @@ function App() {
                     setTextInput('');
                     setAudioBlob(null);
                     setAudioURL(null);
+                    setVideoSignals(null);
                     setCurrentStep(4);
                   }}
                   className="btn btn-secondary"

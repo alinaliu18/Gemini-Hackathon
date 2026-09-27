@@ -1,0 +1,3 @@
+file,goal,question,human_total,human_content,human_structure,human_clarity,human_pacing,human_filler_words,expect
+tests/fixtures/answer.webm,Career,Tell me about a product decision you made using user research.,,,,,,,no_emotion_words;every_item_has_evidence
+tests/fixtures/answer_noisy.webm,Career,Tell me about a product decision you made using user research.,,,,,,,clarity_null_when_noisy;no_emotion_words;every_item_has_evidence

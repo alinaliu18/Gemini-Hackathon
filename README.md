@@ -1,14 +1,75 @@
-# Interview Maestro 🎓
+# Interview Maestro
 
-An AI-powered interview preparation platform that helps users practice for academic, social, and career interviews using Google's Gemini 2.0 Flash model.
+An evidence-based interview practice tool. Record an answer, get feedback where every point points to a timestamp and a quote or a measured signal. Powered by gemini-2.5-flash (config in pipeline/config.py, fallbacks: gemini-flash-latest then gemini-2.5-flash-lite).
 
 ![Home Page Hints](https://img.shields.io/badge/Status-Beta-purple) ![Monet Theme](https://img.shields.io/badge/Theme-Monet-orange)
 
-## ✨ Features
-- **Multi-Track Practice**: Academic, Social, and Career interview paths.
-- **AI Feedback**: Get instant scoring and detailed metrics on tone, pacing, and clarity.
-- **Real-time Live Interview**: Practice with a simulated video interview interface.
-- **Monet-Inspired UI**: A beautiful, calming interface designed to reduce interview anxiety.
+## Features
+- Multi-track practice: Academic, Social, Career interview paths.
+- Evidence-based feedback: every item cites a timestamp plus a transcript quote or a measured signal.
+- Standalone camera practice page (`public/camera.html`); not yet a live, back-and-forth interviewer.
+- Face signals measured in the browser; video never leaves the device.
+
+## What problem this solves
+
+People practicing interviews get vague AI feedback like "be more confident". They cannot check where it came from or what to change. Many tools also guess emotions from the face, which is unreliable.
+
+This tool takes a different approach.
+
+## How it works
+
+**What can be measured is measured in code. Gemini only interprets content.**
+
+Measured in code:
+- Speaking pace: words per minute, compared to a per-track band.
+- Pauses: ffmpeg silencedetect; pauses of 3 seconds or more are surfaced.
+- Filler words: um, uh, you know, "like,", 嗯, 呃, and similar.
+- Background noise: signal-to-noise ratio (SNR).
+- Eye contact and face-in-frame: measured from the camera.
+
+Interpreted by Gemini: content, structure (STAR), clarity, presence.
+
+**Evidence rule.** Every feedback item must cite a timestamp plus either a verbatim quote from the transcript or a measured signal. Quotes are checked against the transcript in code. Items with fabricated quotes or no evidence are dropped. Clicking a timestamp in the results jumps the recording to that moment.
+
+**No emotion inference.** Words like "nervous" or "not confident" are filtered out in code. Smiling is never counted against the user.
+
+**Noisy audio.** If SNR is below 15 dB, clarity is not scored and pauses are not judged (noise hides silences). Pace is estimated from transcript timestamps instead.
+
+**Camera.** MediaPipe Face Landmarker runs in the browser. Video never leaves the device; only numbers are sent (for example "facing camera 72%", look-away moments). If the face is in frame less than 50% of the time, eye contact and presence are marked "not measured" instead of scored low.
+
+**Score.** A track-weighted average (Academic / Social / Career weights) over the dimensions that could be measured. If less than 80% of the rubric weight was measurable, the UI shows "Partial score" and lists what was not measured.
+
+**Reliability.** 429 quota errors rotate to the next API key; 503 overload switches to a fallback model. SDK retries are capped so the user is not left waiting minutes. Audio is sent inline (no upload round trip) when under 15 MB.
+
+## Testing and evaluation
+
+```bash
+./.venv/bin/python tests/test_interpret.py   # offline: evidence, emotion filter, scoring rules
+./.venv/bin/python tests/test_metrics.py     # offline: pauses, noise, fillers
+./.venv/bin/python tests/test_fallback.py    # offline: key rotation / model fallback
+./.venv/bin/python tests/e2e_smoke.py        # real Gemini calls, uses tests/fixtures
+node src/signals/aggregate.test.mjs
+node src/signals/faceSignals.test.mjs
+./.venv/bin/python eval/run_eval.py --selftest   # offline
+./.venv/bin/python eval/run_eval.py --sample     # real API; see eval/README.md for adding human-rated recordings
+```
+
+Current results:
+- eval --sample on the two synthetic fixtures: 5/5 rule checks PASS; end-to-end latency 25-31 s per answer.
+- A browser-recorded answer replayed against the backend (with camera signals): 33-46 s end to end. The full browser flow (record -> upload -> results page with clickable timestamps) was run headless with a simulated mic/camera.
+- Transcription with inline audio: 4-10 s.
+
+## Known limitations
+
+- Gemini transcription sometimes drops filler words despite instructions, so fillers can be undercounted.
+- "Eye contact" is head pose (facing the camera), not true eye tracking.
+- No human-rated recordings yet, so agreement with human scores (MAE) has not been measured; thresholds and weights in pipeline/config.py are initial assumptions to calibrate.
+- Feedback takes about 30 s per answer.
+- The test fixtures are synthetic (macOS text-to-speech), not real candidates.
+
+## Credits
+
+The original camera/live-interview prototype (public/camera.html) was built by a teammate during the hackathon; the evidence-based pipeline was added in the multimodal-upgrade branch.
 
 ## 🚀 Getting Started
 
@@ -49,6 +110,10 @@ pip install -r requirements.txt
 2. Add your Google Gemini API key:
    ```env
    GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+   ```
+   Optional: provide multiple keys for rotation on quota errors:
+   ```env
+   GEMINI_API_KEYS=key1,key2,key3
    ```
    *(Note: You can duplicate `.env.example` and rename it to `.env`)*
 
@@ -100,6 +165,16 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
 - **src/**: React frontend source code.
   - `App.jsx`: Main application logic and routing.
   - `App.css`: All styling (Monet theme, animations).
+  - `src/signals/`: Browser-side face measurement (`faceSignals.js`, `aggregate.js`).
+  - `src/components/EvidenceFeedback.jsx`: Evidence-based feedback display.
+- **pipeline/**: Evaluation pipeline.
+  - `config.py`: Model, thresholds, and track weights.
+  - `transcribe.py`: Transcription.
+  - `audio_metrics.py`: Pauses and noise (SNR).
+  - `text_metrics.py`: Pace and filler words.
+  - `interpret.py`: Gemini interpretation and evidence checks.
+- **tests/**: Offline and smoke tests.
+- **eval/**: Evaluation runner and fixtures (`eval/README.md`).
 - **backend.py**: Flask server handling AI connectivity.
 - **public/camera.html**: Standalone Live Interview module.
 - **AudioTesting/** & **CamTest/**: Legacy testing modules.
@@ -109,6 +184,7 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
 - **Ports**: Frontend uses `5173`, Backend uses `5002`. Ensure these ports are free.
 - **API Key**: If AI feedback fails, check that your `GEMINI_API_KEY` is correct in `.env`.
 - **Microphone/Camera**: Allow browser permissions for recording to work.
+- **ffmpeg**: Must be installed and on your PATH. Pause detection uses ffmpeg silencedetect.
 
 <img width="1307" height="730" alt="Screenshot 2026-05-29 at 23 23 24" src="https://github.com/user-attachments/assets/7ef56bfc-1791-469f-a176-cefbf03e2654" />
 <img width="1302" height="732" alt="Screenshot 2026-05-29 at 23 23 46" src="https://github.com/user-attachments/assets/f8714ec9-7e53-4cc2-bba8-7f322da9b02e" />

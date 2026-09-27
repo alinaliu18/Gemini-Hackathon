@@ -52,4 +52,7 @@ assert cov == 0.65 and missing == ["clarity", "eye_contact", "presence"]
 tm = {"fillers_per_min": 5.0, "filler_count": 5, "filler_breakdown": {"um": 3, "like": 2}, "filler_events": [{"t": 1, "term": "um"}]}
 assert score_fillers(tm)["score"] == 60
 
+from pipeline.interpret import score_eye_contact
+assert score_eye_contact({"face_present_ratio": 0.2, "eye_contact_ratio": 0.0, "look_away_events": []})["score"] is None
+
 print("ALL OK")

@@ -1,6 +1,7 @@
 """Tunable thresholds and weights. Initial values are assumptions: calibrate them against human-rated samples (eval/)."""
 
 MODEL_ID = "gemini-2.5-flash"
+FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash-lite"]  # tried in order when a model is overloaded (503)
 
 # Audio
 MIN_PAUSE_S = 1.5          # silence at least this long counts as a pause

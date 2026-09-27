@@ -63,6 +63,9 @@ def score_fillers(text_m, has_audio=True):
 def score_eye_contact(video):
     if not video:
         return {"score": None, "observation": "No video signals (camera off).", "evidence": []}
+    if video.get("face_present_ratio", 1) < 0.5:
+        return {"score": None, "observation": f"Face in frame only {video['face_present_ratio']:.0%} of the time; "
+                "sit so the camera sees your face.", "evidence": []}
     r = video["eye_contact_ratio"]
     score = 90 if r >= .7 else 75 if r >= .5 else 60 if r >= .3 else 45
     obs = f"Looking toward the camera {r:.0%} of the time the face was visible."
@@ -150,7 +153,8 @@ def validate(model_out, segments, clarity_scorable, has_video):
         ev = _valid_evidence(d.get("evidence"), transcript_norm)
         obs = str(d.get("observation") or "")
         if forced_null:
-            why = "Recording too noisy to judge articulation; try a quieter room." if name == "clarity" else "No video signals (camera off)."
+            why = "Recording too noisy to judge articulation; try a quieter room." if name == "clarity" \
+                else "No usable video (camera off or face not in frame)."
             dims[name] = {"score": None, "observation": why, "evidence": []}
         elif EMOTION_WORDS.search(obs) or not ev or d.get("score") is None:
             dropped.append({"where": name, "why": "emotion inference" if EMOTION_WORDS.search(obs) else "no verifiable evidence", "text": obs})
@@ -182,13 +186,14 @@ def score_coverage(dims, goal):
 def interpret(client, model, question, goal, resume, segments, audio_m, text_m, video):
     """Full interpretation step: model call + rule enforcement + code-scored dimensions + overall score."""
     clarity_scorable = bool(audio_m["duration_s"]) and not audio_m["noisy"]
+    has_video = bool(video) and video.get("face_present_ratio", 1) >= 0.5  # face mostly out of frame = not measured, not "bad"
     focus = config.TRACK_FOCUS.get(goal, config.TRACK_FOCUS["Career"])
-    facts = build_facts(question, goal, focus, resume, segments, audio_m, text_m, video, clarity_scorable)
+    facts = build_facts(question, goal, focus, resume, segments, audio_m, text_m, video if has_video else None, clarity_scorable)
     resp = client.models.generate_content(
         model=model, contents=[PROMPT, facts],
         config={"response_mime_type": "application/json", "temperature": 0.2})
     raw = json.loads(resp.text.replace("```json", "").replace("```", "").strip())
-    clean, dropped = validate(raw if isinstance(raw, dict) else {}, segments, clarity_scorable, bool(video))
+    clean, dropped = validate(raw if isinstance(raw, dict) else {}, segments, clarity_scorable, has_video)
     clean["dimensions"].update({
         "pacing": score_pacing(text_m, audio_m, goal),
         "filler_words": score_fillers(text_m, bool(audio_m["duration_s"])),
