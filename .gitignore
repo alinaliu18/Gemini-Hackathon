@@ -5,3 +5,10 @@ __pycache__/
 venv/
 .DS_Store
 *.log
+
+# build & deps
+node_modules/
+dist/
+.venv/
+# eval data: recordings of real people never go in git
+eval/data/
