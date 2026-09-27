@@ -12,3 +12,4 @@ dist/
 .venv/
 # eval data: recordings of real people never go in git
 eval/data/
+eval_log.csv
