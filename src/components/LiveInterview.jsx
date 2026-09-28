@@ -72,7 +72,8 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
     } catch (e) {
       cleanup();
       setStatus('error');
-      setNote(e.message);
+      // "Failed to fetch" means the backend isn't running, which is the usual local setup mistake.
+      setNote(e instanceof TypeError ? 'Can\'t reach the backend. Start it with `npm start` (or `./.venv/bin/python backend.py`), then try again.' : e.message);
     }
   }
 

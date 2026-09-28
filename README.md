@@ -151,7 +151,15 @@ pip install -r requirements.txt
 
 ## ▶️ Running the App
 
-You need two terminal windows running simultaneously.
+One command starts both the backend (:5002) and the frontend (:5173); Ctrl+C stops both:
+
+```bash
+npm start
+```
+
+Then open http://localhost:5173. If the page says it can't reach the backend, the backend isn't running.
+
+Or run them in two terminals:
 
 **Terminal 1: Start Backend**
 ```bash
