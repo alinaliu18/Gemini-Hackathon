@@ -1737,3 +1737,9 @@ body {
     animation: none;
   }
 }
+
+/* Quick Practice question card */
+.question-card { background: var(--monet-cloud, #f4efe9); border-radius: 16px; padding: 18px 22px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.question-label { font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--monet-steel, #6b7a8c); }
+.question-text { margin: 0; font-size: 1.1rem; line-height: 1.5; color: var(--text-primary, #333); }
+.question-new { align-self: flex-start; }

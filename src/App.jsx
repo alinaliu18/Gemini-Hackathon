@@ -25,6 +25,9 @@ function App() {
   const [evaluation, setEvaluation] = useState(null);
   const [session, setSession] = useState(null); // {report, audioURL} from a live interview
   const [loading, setLoading] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [asked, setAsked] = useState([]);
+  const [questionLoading, setQuestionLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const mediaRecorderRef = React.useRef(null);
@@ -129,6 +132,31 @@ function App() {
     setResumeFile(e.target.files[0]);
   };
 
+  // Quick Practice asks one question built from the uploaded resume (or the context box).
+  const fetchQuestion = async () => {
+    setQuestionLoading(true);
+    try {
+      const form = new FormData();
+      form.append('goal', interviewGoal);
+      form.append('context_text', contextText);
+      form.append('avoid', asked.join(' | '));
+      if (resumeFile) form.append('file', resumeFile);
+      const res = await fetch(`${API_BASE_URL}/api/question`, { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Question failed (${res.status})`);
+      setQuestion(data.question);
+      setAsked((a) => [...a, data.question]);
+    } catch (e) {
+      setError(e instanceof TypeError ? "Can't reach the backend. Start it with `npm start`, then try again." : e.message);
+    } finally {
+      setQuestionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentStep === 4 && !question && !questionLoading) fetchQuestion();
+  }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -158,7 +186,7 @@ function App() {
       formData.append('sub_type', 'Interview');
       formData.append('text_input', textInput);
       formData.append('context_text', contextText);
-      formData.append('question', contextText);
+      formData.append('question', question || contextText);
       if (videoSignals) formData.append('video_signals', JSON.stringify(videoSignals));
 
       if (resumeFile) {
@@ -477,10 +505,15 @@ function App() {
           <header className="app-header step-header">
             <button className="back-btn" onClick={() => setCurrentStep(3)}>← Back</button>
             <h1>Quick Practice</h1>
-            <p className="subtitle">Record your answer or type it below</p>
+            <p className="subtitle">Answer the question out loud or type it below</p>
           </header>
           
           <main className="app-container">
+            <section className="question-card">
+              <span className="question-label">{resumeFile ? 'Question from your resume' : 'Question'}</span>
+              <p className="question-text">{questionLoading ? 'Writing a question…' : (question || 'No question yet.')}</p>
+              <button type="button" className="btn btn-secondary question-new" onClick={fetchQuestion} disabled={questionLoading}>↻ New question</button>
+            </section>
             <form className="practice-form" onSubmit={handleSubmit}>
               <div className="response-section">
                 <div className="audio-section">

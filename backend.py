@@ -139,8 +139,14 @@ def evaluate_interview():
         else:
             audio_m = NO_AUDIO
             segments = [{"start": 0.0, "end": 0.0, "text": typed}] if typed.strip() else []
+        if not segments and typed.strip():  # recording came back empty: grade the typed answer instead
+            segments, audio_m = [{"start": 0.0, "end": 0.0, "text": typed}], NO_AUDIO
         if not segments:
-            return jsonify({"score": 0, "evaluation": "No speech detected. Please record or type an answer.", "metrics": {}}), 400
+            app.logger.warning("empty transcript: speech_s=%s noisy=%s", audio_m.get("speech_s"), audio_m.get("noisy"))
+            msg = ("We couldn't hear any speech in the recording. Check that your microphone is on and not in use "
+                   "by another tab, then record again or type your answer.") if audio and not audio_m.get("speech_s") \
+                else "No speech detected. Please record or type an answer."
+            return jsonify({"score": 0, "evaluation": msg, "metrics": {}}), 400
 
         # In noisy audio silence detection fails, so speech time is unknown: fall back to transcript timestamps.
         text_m = analyze_text(segments, None if audio_m["noisy"] else (audio_m["speech_s"] or None))
@@ -162,6 +168,32 @@ def evaluate_interview():
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+QUESTION_PROMPT = """You are a {track} interviewer preparing one question for a mock interview.
+Resume (may be empty):
+{resume}
+Context from the candidate (may be empty): {context}
+Write ONE interview question. It must name a specific item from the resume (a project, job, number or skill) and ask what
+the candidate decided and why, or how they handled a trade-off or setback. If the resume is empty, use the context; if both
+are empty, ask a common {track} question. Do not repeat any of these: {avoid}
+Return only the question, one or two sentences."""
+
+
+@app.route('/api/question', methods=['POST'])
+def question_route():
+    """One resume-based question for Quick Practice."""
+    goal = (request.form.get('goal') or 'Career').strip().capitalize()
+    prompt = QUESTION_PROMPT.format(track=goal.lower(), resume=(read_resume() or "(none)")[:6000],
+                                    context=request.form.get('context_text', '') or "(none)",
+                                    avoid=request.form.get('avoid', '') or "(none)")
+    try:
+        text, _ = with_client(lambda c, m: c.models.generate_content(model=m, contents=prompt,
+                                                                     config={"temperature": 0.9}).text)
+        return jsonify({"question": text.strip().strip('"')})
+    except Exception as e:
+        app.logger.exception("question failed")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/live/token', methods=['POST'])
