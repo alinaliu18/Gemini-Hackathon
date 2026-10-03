@@ -1743,3 +1743,19 @@ body {
 .question-label { font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--monet-steel, #6b7a8c); }
 .question-text { margin: 0; font-size: 1.1rem; line-height: 1.5; color: var(--text-primary, #333); }
 .question-new { align-self: flex-start; }
+
+/* ---------- Day 1 flow (structure only; restyled from the design system on Day 2) ---------- */
+.landing { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 24px; padding-top: 18vh; }
+.landing-cta { width: auto; padding: 14px 32px; }
+.landing-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 32px; padding: 0; text-align: left; color: var(--text-secondary); }
+.landing-steps li { max-width: 240px; }
+.link-btn { background: none; border: none; padding: 0; color: var(--monet-steel); text-decoration: underline; cursor: pointer; font: inherit; }
+.setup { max-width: 720px; }
+.setup-section { margin-bottom: 32px; }
+.setup-section h3 { margin-bottom: 12px; }
+.setup-section summary { cursor: pointer; font-weight: 600; margin-bottom: 12px; }
+.setup-optional { font-weight: 400; color: var(--text-muted); }
+.setup-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.setup .age-cards { margin-bottom: 0; }
+.setup .age-card { font: inherit; }
+.setup .upload-label { padding: 32px; margin-bottom: 8px; }
