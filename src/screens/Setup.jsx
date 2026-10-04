@@ -6,17 +6,12 @@ const TRACKS = [
   { value: 'social', label: 'Social', desc: 'Clubs, student orgs and volunteer roles' },
 ];
 
-const AGE_GROUPS = [
-  ['middle_school', 'Middle school'], ['high_school', 'High school'], ['college', 'College'],
-  ['early_career', 'Early career'], ['mid_career', 'Mid career'], ['senior_career', 'Senior'],
-];
-
 // The backend only extracts text from PDFs (PyPDF2), so only accept PDFs here.
 const isPdf = (f) => f && /\.pdf$/i.test(f.name);
 
 // One screen before the interview: resume (optional), track, device check, and extra options folded away.
 // Copy follows docs/product-polish/spec.md section 2.2.
-export default function Setup({ goal, setGoal, resumeFile, setResumeFile, ageGroup, setAgeGroup,
+export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
                                 contextText, setContextText, onStart, onBack, onPractice }) {
   const [skipped, setSkipped] = useState(false);
 
@@ -71,12 +66,6 @@ export default function Setup({ goal, setGoal, resumeFile, setResumeFile, ageGro
 
       <details className="setup-section">
         <summary>More options</summary>
-        <label className="setup-field">Your level
-          <select value={ageGroup} onChange={(e) => setAgeGroup(e.target.value)}>
-            <option value="">Not set</option>
-            {AGE_GROUPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </label>
         <label className="setup-field">Job description or notes
           <textarea className="context-textarea" rows="4" value={contextText} onChange={(e) => setContextText(e.target.value)}
                     placeholder="Paste a job description, the role you're applying for, or questions you want to practice." />

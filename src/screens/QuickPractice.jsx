@@ -5,7 +5,7 @@ import { aggregateSignals } from '../signals/aggregate';
 
 // Secondary path: one question, answered by voice or text, scored with the same evidence pipeline.
 // Reached only from the landing page's "Practice one question" link.
-export default function QuickPractice({ apiBase, goal, ageGroup, contextText, resumeFile, onHome, onLive }) {
+export default function QuickPractice({ apiBase, goal, contextText, resumeFile, onHome, onLive }) {
   const [textInput, setTextInput] = useState('');
 
   const [isRecording, setIsRecording] = useState(false);
@@ -126,7 +126,7 @@ export default function QuickPractice({ apiBase, goal, ageGroup, contextText, re
   const fetched = useRef(false);
   useEffect(() => { if (!fetched.current) { fetched.current = true; fetchQuestion(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track and age group are optional here: the backend defaults the track to Career and does not read age_group.
+  // Track is optional here: the backend defaults it to Career.
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -141,7 +141,6 @@ export default function QuickPractice({ apiBase, goal, ageGroup, contextText, re
 
     try {
       const formData = new FormData();
-      formData.append('age_group', ageGroup);
       formData.append('goal', goal);
       formData.append('sub_type', 'Interview');
       formData.append('text_input', textInput);

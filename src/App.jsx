@@ -13,7 +13,6 @@ function App() {
   const [screen, setScreen] = useState('landing'); // landing | setup | live | report | practice
 
   // Shared inputs: Setup fills them, the live interview and Quick Practice send them to the backend.
-  const [ageGroup, setAgeGroup] = useState('');
   const [interviewGoal, setInterviewGoal] = useState('');
   const [resumeFile, setResumeFile] = useState(null);
   const [contextText, setContextText] = useState('');
@@ -26,7 +25,7 @@ function App() {
 
       {screen === 'setup' && (
         <Setup goal={interviewGoal} setGoal={setInterviewGoal} resumeFile={resumeFile} setResumeFile={setResumeFile}
-               ageGroup={ageGroup} setAgeGroup={setAgeGroup} contextText={contextText} setContextText={setContextText}
+               contextText={contextText} setContextText={setContextText}
                onStart={() => setScreen('live')} onBack={() => setScreen('landing')} onPractice={() => setScreen('practice')} />
       )}
 
@@ -59,7 +58,7 @@ function App() {
       )}
 
       {screen === 'practice' && (
-        <QuickPractice apiBase={API_BASE_URL} goal={interviewGoal} ageGroup={ageGroup} contextText={contextText}
+        <QuickPractice apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText}
                        resumeFile={resumeFile} onHome={() => setScreen('landing')} onLive={() => setScreen('setup')} />
       )}
     </div>
