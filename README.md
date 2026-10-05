@@ -2,12 +2,18 @@
 
 An interview practice tool with a live voice interviewer. It asks about your resume, follows up on what you actually say, and gives a report where every point links to a timestamp and a quote or a measured signal. Scoring uses gemini-2.5-flash (fallbacks: gemini-flash-latest, then gemini-3.5-flash-lite); the interviewer uses gemini-3.8-live (config in pipeline/config.py).
 
-![Home Page Hints](https://img.shields.io/badge/Status-Beta-purple) ![Monet Theme](https://img.shields.io/badge/Theme-Monet-orange)
+![Status](https://img.shields.io/badge/Status-Beta-purple)
+
+![Landing page](docs/screenshots/landing.png)
+
+**How a session goes:** open the landing page, add your resume (optional) and pick a track on one setup screen, then talk with the live interviewer. When you end the call you get a report. Practicing a single question is still available from a link on the landing page.
 
 ## Features
-- Multi-track practice: Academic, Social, Career interview paths.
+- Three tracks: Academic, Career, Social.
+- Resume upload accepts PDF only (the backend reads PDFs).
 - Evidence-based feedback: every item cites a timestamp plus a transcript quote or a measured signal.
-- Live interview (main path): a spoken interview with Gemini Live. Questions come from your resume; the interviewer follows up on your answers; you can interrupt it.
+- One main path: Landing, then Setup (resume, track, mic and camera check on one screen), then the live interview, then the report.
+- Live interview: a spoken interview with Gemini Live. Questions come from your resume; the interviewer follows up on your answers; you can interrupt it.
 - Whole-interview report: an overall score plus feedback for each question.
 - Face signals measured in the browser; video never leaves the device.
 
@@ -201,8 +207,10 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
 ## 📂 Project Structure
 
 - **src/**: React frontend source code.
-  - `App.jsx`: Main application logic and routing.
-  - `App.css`: All styling (Monet theme, animations).
+  - `App.jsx`: Switches between screens (landing, setup, live, report, practice) and holds shared inputs.
+  - `src/screens/`: `Landing.jsx`, `Setup.jsx`, `QuickPractice.jsx`.
+  - `src/components/LiveInterview.jsx` and `SessionReport.jsx`: the live call and the whole-interview report.
+  - `App.css`: Styling. A new white and blue design is specified in `docs/product-polish/` and not wired in yet.
   - `src/signals/`: Browser-side face measurement (`faceSignals.js`, `aggregate.js`).
   - `src/components/EvidenceFeedback.jsx`: Evidence-based feedback display.
 - **pipeline/**: Evaluation pipeline.
@@ -216,6 +224,8 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
 - **backend.py**: Flask server handling AI connectivity.
 - **public/camera.html**: Standalone Live Interview module.
 - **AudioTesting/** & **CamTest/**: Legacy testing modules.
+- **docs/product-polish/**: Product spec, design system, and a clickable design demo for the redesign.
+- **docs/screenshots/**: Screenshots used in this README.
 
 ## 🛠 Troubleshooting
 
@@ -223,6 +233,8 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
 - **API Key**: If AI feedback fails, check that your `GEMINI_API_KEY` is correct in `.env`.
 - **Microphone/Camera**: Allow browser permissions for recording to work.
 - **ffmpeg**: Must be installed and on your PATH. Pause detection uses ffmpeg silencedetect.
+
+### Earlier version (May 2026 hackathon build)
 
 <img width="1307" height="730" alt="Screenshot 2026-05-29 at 23 23 24" src="https://github.com/user-attachments/assets/7ef56bfc-1791-469f-a176-cefbf03e2654" />
 <img width="1302" height="732" alt="Screenshot 2026-05-29 at 23 23 46" src="https://github.com/user-attachments/assets/f8714ec9-7e53-4cc2-bba8-7f322da9b02e" />
