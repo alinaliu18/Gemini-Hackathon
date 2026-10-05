@@ -10,7 +10,8 @@ const API_BASE_URL = 'http://localhost:5002';
 
 // Main path: landing -> setup -> live -> report. Quick Practice ('practice') is only reachable from the landing link.
 function App() {
-  const [screen, setScreen] = useState('landing'); // landing | setup | live | report | practice
+  // #setup opens Setup directly (handy for screenshots and sharing); every other screen needs state from earlier ones.
+  const [screen, setScreen] = useState(() => (window.location.hash === '#setup' ? 'setup' : 'landing')); // landing | setup | live | report | practice
 
   // Shared inputs: Setup fills them, the live interview and Quick Practice send them to the backend.
   const [interviewGoal, setInterviewGoal] = useState('');

@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { TopBar } from './Landing';
+import './screens.css';
 
 const TRACKS = [
-  { value: 'academic', label: 'Academic', desc: 'College, scholarship and grad school interviews' },
-  { value: 'career', label: 'Career', desc: 'Internships and job interviews' },
-  { value: 'social', label: 'Social', desc: 'Clubs, student orgs and volunteer roles' },
+  { value: 'academic', label: 'Academic', desc: 'College, scholarship and grad school interviews.',
+    icon: 'M2.5 9 12 4.5 21.5 9 12 13.5zM6.5 11v4.5c1.5 1.5 3.4 2.2 5.5 2.2s4-.7 5.5-2.2V11M21.5 9v5' },
+  { value: 'career', label: 'Career', desc: 'Internships and jobs. Behavioral and resume questions.',
+    icon: 'M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3 12.5h18' },
+  { value: 'social', label: 'Social', desc: 'Clubs, student orgs and volunteer roles.',
+    icon: 'M4 5h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM19.5 9H20a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1v2.5L16 18h-4' },
 ];
 
 // The backend only extracts text from PDFs (PyPDF2), so only accept PDFs here.
@@ -14,73 +19,84 @@ const isPdf = (f) => f && /\.pdf$/i.test(f.name);
 export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
                                 contextText, setContextText, onStart, onBack, onPractice }) {
   const [skipped, setSkipped] = useState(false);
+  const pick = (f) => isPdf(f) && setResumeFile(f);
 
   return (
-    <main className="app-container setup">
-      <header className="app-header">
-        <h1>Set up your interview</h1>
-        <p className="subtitle">Takes about 30 seconds.</p>
-      </header>
-
-      <section className="setup-section">
-        <h3>Resume <span className="setup-optional">(optional)</span></h3>
-        {resumeFile ? (
-          <p>{resumeFile.name} · Ready <button type="button" className="link-btn" onClick={() => setResumeFile(null)}>Remove</button></p>
-        ) : skipped ? (
-          <p>No resume. You'll get general questions for the type you pick.{' '}
-            <button type="button" className="link-btn" onClick={() => setSkipped(false)}>Add resume</button></p>
-        ) : (
-          <>
-            <input type="file" accept=".pdf" id="resume-upload" className="file-input"
-                   onChange={(e) => isPdf(e.target.files[0]) && setResumeFile(e.target.files[0])} />
-            <label htmlFor="resume-upload" className="upload-label"
-                   onDragOver={(e) => e.preventDefault()}
-                   onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (isPdf(f)) setResumeFile(f); }}>
-              <span className="upload-text">Drop your resume here or browse</span>
-              <span className="upload-hint">PDF</span>
-            </label>
-            <p className="camera-note">No resume?{' '}
-              <button type="button" className="link-btn" onClick={() => setSkipped(true)}>Skip</button>
-              {' '}this. You'll get general questions for the type you pick.</p>
-          </>
-        )}
-      </section>
-
-      <section className="setup-section">
-        <h3>Interview type</h3>
-        <div className="age-cards" role="radiogroup" aria-label="Interview type">
-          {TRACKS.map((t) => (
-            <button key={t.value} type="button" role="radio" aria-checked={goal === t.value}
-                    className={`age-card ${goal === t.value ? 'selected' : ''}`} onClick={() => setGoal(t.value)}>
-              <span className="age-label">{t.label}</span>
-              <span className="age-desc">{t.desc}</span>
-            </button>
-          ))}
+    <div className="screen-page">
+      <TopBar onHome={onBack} />
+      <main className="setup">
+        <div className="setup-title">
+          <h1 className="display">Set up your session</h1>
+          <p>Takes under a minute. Nothing is recorded until you start.</p>
         </div>
-      </section>
 
-      <section className="setup-section">
-        <h3>Mic and camera</h3>
-        <DeviceCheck onPractice={onPractice} />
-      </section>
+        <section className="field">
+          <div className="field-head">
+            <h2>Resume <small>Optional</small></h2>
+            {!resumeFile && !skipped && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSkipped(true)}>Skip</button>}
+          </div>
+          {resumeFile ? (
+            <div className="drop is-done">
+              <FileIcon />
+              <p><b>{resumeFile.name}</b><small>Ready. The interviewer will ask about it.</small></p>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setResumeFile(null)}>Remove</button>
+            </div>
+          ) : skipped ? (
+            <p className="hint">No resume. You'll get general questions for the track you pick.{' '}
+              <button type="button" className="link-btn" onClick={() => setSkipped(false)}>Add resume</button></p>
+          ) : (
+            <label className="drop" onDragOver={(e) => e.preventDefault()}
+                   onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files[0]); }}>
+              <FileIcon />
+              <p><b>Drop your resume here</b> or <u>browse</u><small>PDF only. The interviewer uses it to pick questions.</small></p>
+              <input type="file" accept=".pdf,application/pdf" className="visually-hidden" onChange={(e) => pick(e.target.files[0])} />
+            </label>
+          )}
+        </section>
 
-      <details className="setup-section">
-        <summary>More options</summary>
-        <label className="setup-field">Job description or notes
-          <textarea className="context-textarea" rows="4" value={contextText} onChange={(e) => setContextText(e.target.value)}
-                    placeholder="Paste a job description, the role you're applying for, or questions you want to practice." />
-        </label>
-      </details>
+        <fieldset className="field">
+          <div className="field-head"><h2>Track</h2></div>
+          <div className="tracks">
+            {TRACKS.map((t) => (
+              <label key={t.value} className="track">
+                <input type="radio" name="track" value={t.value} checked={goal === t.value} onChange={() => setGoal(t.value)} />
+                <span className="check"><svg viewBox="0 0 12 12"><path d="m2.5 6.2 2.3 2.3 4.7-5" /></svg></span>
+                <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d={t.icon} /></svg>
+                <b>{t.label}</b>
+                <span>{t.desc}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
-      <p className="camera-note">About 3 questions with follow-ups. 5 to 8 minutes.</p>
-      <div className="step-buttons">
-        <button type="button" className="btn btn-secondary" onClick={onBack}>Back</button>
-        <button type="button" className="btn btn-submit" disabled={!goal} onClick={onStart}>Start interview</button>
-      </div>
-      {!goal && <p className="camera-note">Pick an interview type to start.</p>}
-    </main>
+        <section className="field">
+          <div className="field-head"><h2>Mic and camera</h2></div>
+          <DeviceCheck onPractice={onPractice} />
+        </section>
+
+        <details className="more">
+          <summary><svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>More options</summary>
+          <label className="more-field">Notes for the interviewer
+            <textarea rows="4" value={contextText} onChange={(e) => setContextText(e.target.value)}
+                      placeholder="Paste the job description, or anything you want to be asked about." />
+          </label>
+        </details>
+
+        <div className="setup-foot">
+          <p>{goal ? 'About 3 questions with follow-ups, 5 to 8 minutes. You can end it any time.' : 'Pick a track to start.'}</p>
+          <div>
+            <button type="button" className="btn btn-secondary" onClick={onBack}>Back</button>
+            <button type="button" className="btn btn-lg" disabled={!goal} onClick={onStart}>Start interview</button>
+          </div>
+        </div>
+      </main>
+    </div>
   );
 }
+
+const FileIcon = () => (
+  <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M12 17v-6M9.5 13.5 12 11l2.5 2.5" /></svg>
+);
 
 // Asks for mic + camera, shows a live mic level and a camera preview. Everything is released when the screen
 // unmounts so LiveInterview can open the devices itself.
@@ -133,24 +149,35 @@ function DeviceCheck({ onPractice }) {
     setState('ready');
   }
 
+  const bars = 20, on = Math.round(Math.min(level * 3, 1) * bars);
   return (
-    <div className="camera-panel">
-      {state !== 'ready' && (
-        <button type="button" className="btn btn-secondary" onClick={check} disabled={state === 'checking'}>
-          {state === 'checking' ? 'Waiting for permission' : state === 'idle' ? 'Check mic and camera' : 'Try again'}
-        </button>
-      )}
-      {state === 'blocked' && <p className="camera-note">Your microphone is blocked. The interviewer needs to hear you.
-        Click the lock icon in the address bar, allow Microphone, then try again.{' '}
-        <button type="button" className="link-btn" onClick={onPractice}>Practice by typing instead</button></p>}
-      {state === 'nomic' && <p className="camera-note">We can't find a microphone. Plug one in or check your system settings.</p>}
-      {state === 'ready' && (
-        <label>Mic level <meter min="0" max="1" low="0.05" value={level} aria-label="Microphone level" /></label>
-      )}
-      {state === 'ready' && <p className="camera-note">{level < 0.05 ? 'Say something. The bar should move.' : 'Mic is working'}</p>}
-      <video ref={videoRef} className="camera-preview" muted playsInline hidden={!camera} />
-      {state === 'ready' && !camera && <p className="camera-note">Camera is off. You can still do the interview. Eye contact won't be measured.</p>}
-      {camera && <p className="camera-note">Camera is on. It only measures where you look, on this device.</p>}
+    <div className="devices">
+      <div className="cam">
+        <video ref={videoRef} muted playsInline hidden={!camera} />
+        {!camera && <span className="cam-empty">{state === 'ready' ? 'Camera off' : 'Camera preview'}</span>}
+        {camera && <span className="status-ok cam-status"><span className="dot" />Camera on</span>}
+      </div>
+      <div className="mic">
+        {state !== 'ready' && (
+          <button type="button" className="btn btn-secondary" onClick={check} disabled={state === 'checking'}>
+            {state === 'checking' ? 'Waiting for permission' : state === 'idle' ? 'Check mic and camera' : 'Try again'}
+          </button>
+        )}
+        {state === 'ready' && (
+          <>
+            <span className="label">Microphone</span>
+            <div className="meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="1" aria-valuenow={level.toFixed(2)}>
+              {Array.from({ length: bars }, (_, k) => <i key={k} className={k < on ? (k >= bars - 3 ? 'on hot' : 'on') : ''} />)}
+            </div>
+            <p className="hint">{level < 0.05 ? 'Say a few words. The bar should move.' : <span className="status-ok"><span className="dot" />Mic is working</span>}</p>
+            {!camera && <p className="hint">Camera is off. You can still do the interview; eye contact won't be measured.</p>}
+          </>
+        )}
+        {state === 'blocked' && <p className="hint">Your microphone is blocked. Click the lock icon in the address bar, allow Microphone, then try again.{' '}
+          <button type="button" className="link-btn" onClick={onPractice}>Practice by typing instead</button></p>}
+        {state === 'nomic' && <p className="hint">We can't find a microphone. Plug one in or check your system settings.</p>}
+        <p className="hint">Use headphones if you can, so the interviewer's voice doesn't reach your mic. Video stays on this device.</p>
+      </div>
     </div>
   );
 }
