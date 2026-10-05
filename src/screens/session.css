@@ -168,3 +168,18 @@
   .answer-score { grid-column: 2; grid-row: 1; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------- Report while it streams in ---------- */
+.steps-live { list-style: none; display: grid; gap: var(--space-3); background: var(--color-tint); border-radius: var(--radius-lg); padding: var(--space-5); }
+.steps-live li { display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-3); align-items: center; color: var(--color-text-tertiary); }
+.step-mark { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--color-border-strong); display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+.step-active { color: var(--color-ink); }
+.step-active .step-mark { border-color: var(--color-blue-text); border-top-color: transparent; animation: spin 900ms linear infinite; }
+.step-done { color: var(--color-ink); }
+.step-done .step-mark { background: var(--color-blue); border-color: var(--color-blue); color: var(--color-on-blue); }
+.step-detail { font-size: var(--fs-label); color: var(--color-text-secondary); }
+.steps-live .steps-hint { display: block; color: var(--color-text-secondary); font-size: var(--fs-label); padding-top: var(--space-2); }
+.skeleton { height: 76px; border-radius: var(--radius-lg); background: linear-gradient(90deg, var(--color-tint) 25%, var(--color-tint-strong) 50%, var(--color-tint) 75%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; }
+.skeleton-row { height: 56px; }
+.report-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); background: var(--color-danger-subtle); color: var(--color-danger); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }

@@ -54,6 +54,27 @@ Interpreted by Gemini: content, structure (STAR), clarity, presence.
 
 **Reliability.** 429 quota errors rotate to the next API key; 503 overload switches to a fallback model. SDK retries are capped so the user is not left waiting minutes. Audio is sent inline (no upload round trip) when under 15 MB.
 
+## Saved runs
+
+Every run is saved so nothing is lost, even when a model call fails: the input is written when the run starts, the output (or the error) when it ends. One SQLite file, `data/maestro.db`, holds the goal, notes, resume text, the interviewer's turns, camera measurements, the recording path, the full report, score, errors and timings. Recordings go to `data/audio/`. The folder is gitignored because recordings of real people never go in git.
+
+```bash
+./.venv/bin/python -m pipeline.store        # list the 10 most recent runs
+```
+
+`MAESTRO_DATA_DIR` moves the folder; `STORE_AUDIO=0` keeps text only. Before a public deployment, add a consent notice and a retention rule, since this stores people's voices and resumes.
+
+## Report speed
+
+The report for a whole interview used to take 30 to 60 seconds. Three changes:
+- Thinking is off for transcription and the feedback JSON (`THINKING_BUDGET` in `pipeline/config.py`). On one synthetic 3-answer interview this took the report from 29.5 s to 9 to 15 s.
+- Each answer is transcribed and then scored on its own thread; the overall summary waits only for the transcripts.
+- `/api/session_report/stream` sends the report as it is built, one JSON object per line: `stage`, `transcribed`, `answer`, `summary`, then `done` with the full report (or `error`). The report page opens immediately and fills in as results arrive.
+
+Gemini's own latency varies a lot from run to run. `tests/test_session_stream.py` checks the event order and the pipelining offline.
+
+**API quota.** The free tier allows about 20 requests per day per model per key, and one report takes about 7. Use a paid key for anything shared. `VITE_API_BASE` points the frontend at a different backend.
+
 ## Live interview
 
 **Why.** Realtime voice alone is now common (general assistants do it well). What this adds: questions grounded in your resume, follow-ups that probe what you just said ("what was YOUR part", "what was the number"), and a report built on measured evidence.
@@ -216,6 +237,7 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
   - `App.jsx`: Switches between screens (landing, setup, live, report, practice) and holds shared inputs.
   - `src/screens/`: `Landing.jsx`, `Setup.jsx`, `QuickPractice.jsx`, with `screens.css` and `session.css`.
   - `src/components/LiveInterview.jsx` and `SessionReport.jsx`: the live call (starts when the screen opens) and the whole-interview report.
+  - `src/App.jsx` also reads the streamed report and passes it to `SessionReport.jsx` as it arrives.
   - `src/index.css`: Design tokens (white and cobalt blue) and shared buttons. The design is specified in `docs/product-polish/`.
   - `src/signals/`: Browser-side face measurement (`faceSignals.js`, `aggregate.js`).
   - `src/components/EvidenceFeedback.jsx`: Evidence-based feedback display.
@@ -225,7 +247,8 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
   - `audio_metrics.py`: Pauses and noise (SNR).
   - `text_metrics.py`: Pace and filler words.
   - `interpret.py`: Gemini interpretation and evidence checks.
-- **tests/**: Offline and smoke tests.
+- **tests/**: Offline and smoke tests (`test_session_stream.py`, `test_store.py` run without any API call).
+- **pipeline/store.py**: Saves every run (see Saved runs).
 - **eval/**: Evaluation runner and fixtures (`eval/README.md`).
 - **backend.py**: Flask server handling AI connectivity.
 - **public/camera.html**: Standalone Live Interview module.

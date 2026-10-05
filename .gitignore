@@ -13,3 +13,5 @@ dist/
 # eval data: recordings of real people never go in git
 eval/data/
 eval_log.csv
+# saved runs: inputs, outputs and recordings of real people never go in git
+/data/

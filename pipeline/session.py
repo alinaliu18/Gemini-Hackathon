@@ -3,7 +3,8 @@ and one overall summary for the session. Reuses the single-answer pipeline, so t
 import re
 import subprocess
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Lock
 
 from . import config
 from .interpret import interpret, overall_score
@@ -51,21 +52,20 @@ def answer_audio(audio_m, segs):
             "pauses": pauses, "long_pause_count": sum(p["duration"] >= config.LONG_PAUSE_S for p in pauses)}
 
 
-def session_report(call, goal, context, resume, audio_path, turns, audio_m, video, analyze_text):
+def session_report(call, goal, context, resume, audio_path, turns, audio_m, video, analyze_text, emit=None):
     """`call(fn)` runs fn(client, model) with key/model fallback and returns (result, model).
-    Returns {"summary", "answers", "segments"}; every timestamp is relative to the start of the recording."""
+    Returns {"summary", "answers", "segments"}; every timestamp is relative to the start of the recording.
+
+    Each answer is transcribed and then interpreted on its own thread, so feedback for a short answer does not wait for
+    the slowest transcription. The overall summary waits only for the transcripts. `emit(event)` is told about progress:
+    {"type": "stage", "total"}, {"type": "transcribed", "done", "total"}, {"type": "answer", "index", "answer"},
+    {"type": "summary", "summary"}. Without `emit` the function just returns the finished report."""
+    emit = emit or (lambda event: None)
     windows = [w for w in answer_windows(questions_from_turns(turns), audio_m["duration_s"]) if w[2] - w[1] >= 1.0]
-    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=max(1, len(windows))) as pool:
-        seglists = list(pool.map(lambda iw: transcribe_window(call, audio_path, iw[1][1], iw[1][2], f"{tmp}/a{iw[0]}.wav"),
-                                 enumerate(windows)))
-    answers = []
-    for (q, _, end), segs in zip(windows, seglists):
-        segs = candidate_segments([s for s in segs if s["start"] < end], turns)  # drops a cut-off interviewer's voice
-        if segs:
-            answers.append({"question": q["text"], "asked_at": q["start"], "segments": segs})
-    segments = [s for a in answers for s in a["segments"]]
-    if not answers:
-        return {"summary": None, "answers": [], "segments": [], "note": "No answers found in the recording."}
+    emit({"type": "stage", "stage": "transcribing", "total": len(windows)})
+    transcripts = [Future() for _ in windows]  # the summary needs all of them; each answer needs only its own
+    done = {"n": 0}
+    lock = Lock()
 
     def per_answer(a):
         text_m = analyze_text(a["segments"])  # pace from transcript timestamps: the answer windows are short
@@ -77,7 +77,29 @@ def session_report(call, goal, context, resume, audio_path, turns, audio_m, vide
         res.pop("score_coverage", None); res.pop("not_measured", None)
         return {"question": a["question"], "asked_at": a["asked_at"], **res}
 
+    def answer_task(i, window, tmp):
+        q, start, end = window
+        try:
+            segs = transcribe_window(call, audio_path, start, end, f"{tmp}/a{i}.wav")
+            segs = candidate_segments([s for s in segs if s["start"] < end], turns)  # drops a cut-off interviewer's voice
+            a = {"question": q["text"], "asked_at": q["start"], "segments": segs} if segs else None
+        except Exception as e:
+            transcripts[i].set_exception(e)
+            raise
+        transcripts[i].set_result(a)
+        with lock:
+            done["n"] += 1
+            emit({"type": "transcribed", "done": done["n"], "total": len(windows)})
+        if a is None:
+            return None
+        res = per_answer(a)
+        emit({"type": "answer", "index": i, "answer": res})
+        return a, res
+
     def summary():
+        answers = [a for a in (t.result() for t in transcripts) if a]
+        if not answers:
+            return None
         segs = [s for a in answers for s in a["segments"]]
         speech = round(sum(s["end"] - s["start"] for s in segs), 2)
         pauses = [p for a in answers for p in answer_audio(audio_m, a["segments"])["pauses"]]
@@ -87,11 +109,34 @@ def session_report(call, goal, context, resume, audio_path, turns, audio_m, vide
         asked = " | ".join(a["question"] for a in answers)
         res, _ = call(lambda c, m: interpret(c, m, f"Whole interview. Questions asked: {asked}. {context}", goal,
                                              resume, segs, audio_s, text_m, video))
-        res["strengths"], res["improvements"] = res["strengths"][:2], res["improvements"][:2]
+        res["strengths"], res["improvements"] = res["strengths"][:2], res["improvements"][:3]
+        emit({"type": "summary", "summary": res})
         return res
 
     # ponytail: one thread per answer; fine for a 3-4 question interview, cap workers if sessions get long
-    with ThreadPoolExecutor(max_workers=len(answers) + 1) as pool:
+    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=len(windows) + 1) as pool:
+        tasks = [pool.submit(answer_task, i, w, tmp) for i, w in enumerate(windows)]
         s = pool.submit(summary)
-        per = list(pool.map(per_answer, answers))
-    return {"summary": s.result(), "answers": per, "segments": segments}
+        results = [t.result() for t in tasks]
+        summ = s.result()
+    results = [r for r in results if r]
+    if not results:
+        return {"summary": None, "answers": [], "segments": [], "note": "No answers found in the recording."}
+    answers = [r[1] for r in results]
+    summ["improvements"] = top_up(summ["improvements"], answers, 3)
+    return {"summary": summ, "answers": answers, "segments": [seg for a, _ in results for seg in a["segments"]]}
+
+
+def top_up(improvements, answers, n):
+    """The report leads with the `n` most useful fixes. The summary alone sometimes finds fewer, so fill the rest from
+    the per-answer feedback (skipping repeats), keeping only items that carry evidence."""
+    out = list(improvements)
+    seen = {i["text"].strip().lower() for i in out}
+    for a in answers:
+        for item in a.get("improvements", []):
+            key = item["text"].strip().lower()
+            if len(out) >= n:
+                return out
+            if key not in seen and item.get("evidence"):
+                out.append(item); seen.add(key)
+    return out

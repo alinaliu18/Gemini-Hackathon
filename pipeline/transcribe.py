@@ -4,6 +4,8 @@ from pathlib import Path
 
 from google.genai import types
 
+from . import config
+
 INLINE_LIMIT = 15 * 1024 * 1024  # Gemini takes up to 20 MB of inline data per request; above that, use the Files API
 
 PROMPT = """Transcribe this interview answer VERBATIM.
@@ -32,7 +34,7 @@ def transcribe(client, model, audio_path, mime_type):
     resp = client.models.generate_content(
         model=model,
         contents=[PROMPT, audio],
-        config={"response_mime_type": "application/json", "temperature": 0},
+        config={"response_mime_type": "application/json", "temperature": 0, **config.thinking(model, "transcribe")},
     )
     raw = json.loads(resp.text.replace("```json", "").replace("```", "").strip())
     segs = []

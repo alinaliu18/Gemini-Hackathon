@@ -2,6 +2,15 @@
 
 MODEL_ID = "gemini-2.5-flash"
 FALLBACK_MODELS = ["gemini-flash-latest", "gemini-3.5-flash-lite"]  # tried in order when a model is overloaded (503) or retired (404)
+# Thinking tokens cost seconds. Transcription needs none; the feedback JSON needs only a little. Applies to gemini-2.5 models;
+# the fallback models decide for themselves.
+THINKING_BUDGET = {"transcribe": 0, "interpret": 0}
+
+
+def thinking(model, stage):
+    return {"thinking_config": {"thinking_budget": THINKING_BUDGET[stage]}} if model.startswith("gemini-2.5") else {}
+
+
 LIVE_MODEL = "gemini-3.8-live"  # realtime voice interviewer (Live API)
 LIVE_SILENCE_MS = 2500     # silence before the interviewer treats an answer as finished; raise if it cuts people off while thinking
 

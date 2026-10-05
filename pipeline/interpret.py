@@ -191,7 +191,7 @@ def interpret(client, model, question, goal, resume, segments, audio_m, text_m, 
     facts = build_facts(question, goal, focus, resume, segments, audio_m, text_m, video if has_video else None, clarity_scorable)
     resp = client.models.generate_content(
         model=model, contents=[PROMPT, facts],
-        config={"response_mime_type": "application/json", "temperature": 0.2})
+        config={"response_mime_type": "application/json", "temperature": 0.2, **config.thinking(model, "interpret")})
     raw = json.loads(resp.text.replace("```json", "").replace("```", "").strip())
     clean, dropped = validate(raw if isinstance(raw, dict) else {}, segments, clarity_scorable, has_video)
     clean["dimensions"].update({

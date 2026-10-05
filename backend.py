@@ -3,12 +3,14 @@ import io
 import csv
 import json
 import time
+import queue
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import PyPDF2
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from google import genai
 from google.genai import types
@@ -20,6 +22,7 @@ from pipeline.transcribe import transcribe
 from pipeline.interpret import interpret, mmss
 from pipeline.live import system_instruction, mint_token
 from pipeline.session import session_report
+from pipeline import store
 
 # ---------- load .env ----------
 env_path = Path(__file__).parent / '.env'
@@ -119,6 +122,7 @@ def evaluate_interview():
     if request.method == 'OPTIONS':
         return '', 200
     temp_path = None
+    run_id = None
     timings = {}
     try:
         t0 = time.time()
@@ -132,6 +136,9 @@ def evaluate_interview():
 
         if audio:
             temp_path, audio_m = save_and_measure(audio, timings)
+        run_id = store.start_run('practice', goal, request.form.get('context_text'), resume, question, typed, video=video,
+                                 audio_src=temp_path, audio_mime=audio.mimetype if audio else None)  # input saved before any model call
+        if audio:
             t = time.time()
             segments, timings['transcribe_model'] = with_client(
                 lambda c, m: transcribe(c, m, temp_path, audio.mimetype or 'audio/webm'))
@@ -146,6 +153,7 @@ def evaluate_interview():
             msg = ("We couldn't hear any speech in the recording. Check that your microphone is on and not in use "
                    "by another tab, then record again or type your answer.") if audio and not audio_m.get("speech_s") \
                 else "No speech detected. Please record or type an answer."
+            store.finish_run(run_id, error=msg, timings=timings)
             return jsonify({"score": 0, "evaluation": msg, "metrics": {}}), 400
 
         # In noisy audio silence detection fails, so speech time is unknown: fall back to transcript timestamps.
@@ -161,9 +169,12 @@ def evaluate_interview():
                        "timings": timings})
         result.update(legacy_view(result))
         log_run(goal, result, timings)
+        store.finish_run(run_id, report=result, timings=timings)
         return jsonify(result)
     except Exception as e:
         app.logger.exception("evaluate failed")
+        if run_id:
+            store.finish_run(run_id, error=e, timings=timings)
         return jsonify({"score": 0, "evaluation": f"Backend Error: {e}", "metrics": {}}), 500
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -214,34 +225,89 @@ def live_token():
     return jsonify({"error": str(last)}), 429
 
 
+def build_report(audio, goal, context, turns, video, resume, emit=None):
+    """Run the whole-interview pipeline on an uploaded recording. Returns the finished report dict."""
+    timings = {}
+    t0 = time.time()
+    temp_path, audio_m = save_and_measure(audio, timings)
+    run_id = store.start_run('live', goal, context, resume, turns=turns, video=video, audio_src=temp_path,
+                             audio_mime=getattr(audio, 'mimetype', None))  # the input is saved before any model call
+    try:
+        report = session_report(with_client, goal, context, resume, temp_path, turns, audio_m, video, analyze_text, emit)
+    except Exception as e:
+        store.finish_run(run_id, error=e, timings=timings)
+        raise
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    timings['total_ms'] = int((time.time() - t0) * 1000)
+    report.update({"transcript": [{**s, "t": mmss(s["start"])} for s in report.pop("segments")], "turns": turns,
+                   "signals": {"audio": audio_m, "video": video}, "timings": timings, "run_id": run_id})
+    store.finish_run(run_id, report=report, timings=timings)
+    return report
+
+
+def report_inputs():
+    goal = (request.form.get('goal') or 'Career').strip().capitalize()
+    turns = json.loads(request.form.get('turns') or '[]')
+    video = json.loads(request.form['video_signals']) if request.form.get('video_signals') else None
+    return goal, request.form.get('context_text', ''), turns, video, read_resume() or "No resume provided."
+
+
 @app.route('/api/session_report', methods=['POST'])
 def session_report_route():
     """Report for a whole live interview: the candidate's recording + the interviewer's turns (+ on-device video numbers)."""
-    temp_path = None
-    timings = {}
     try:
-        t0 = time.time()
-        goal = (request.form.get('goal') or 'Career').strip().capitalize()
-        turns = json.loads(request.form.get('turns') or '[]')
-        video = json.loads(request.form['video_signals']) if request.form.get('video_signals') else None
         audio = request.files.get('audio_response')
         if not audio:
             return jsonify({"error": "No recording uploaded."}), 400
-        temp_path, audio_m = save_and_measure(audio, timings)
-        t = time.time()
-        report = session_report(with_client, goal, request.form.get('context_text', ''), read_resume() or "No resume provided.",
-                                temp_path, turns, audio_m, video, analyze_text)
-        timings['report_ms'] = int((time.time() - t) * 1000)
-        timings['total_ms'] = int((time.time() - t0) * 1000)
-        report.update({"transcript": [{**s, "t": mmss(s["start"])} for s in report.pop("segments")], "turns": turns,
-                       "signals": {"audio": audio_m, "video": video}, "timings": timings})
-        return jsonify(report)
+        goal, context, turns, video, resume = report_inputs()
+        return jsonify(build_report(audio, goal, context, turns, video, resume))
     except Exception as e:
         app.logger.exception("session report failed")
         return jsonify({"error": f"Backend Error: {e}"}), 500
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+
+
+@app.route('/api/session_report/stream', methods=['POST'])
+def session_report_stream_route():
+    """Same report, sent as it is built: one JSON object per line (stage, transcribed, answer, summary), then
+    {"type": "done", "report": ...} with the finished report, or {"type": "error", ...}."""
+    audio = request.files.get('audio_response')
+    if not audio:
+        return jsonify({"error": "No recording uploaded."}), 400
+    try:
+        goal, context, turns, video, resume = report_inputs()
+    except Exception as e:
+        return jsonify({"error": f"Bad request: {e}"}), 400
+    events = queue.Queue()
+    # Save the upload before the response starts: the request's files are gone once the view returns.
+    path = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio.filename or '')[1] or '.webm')
+    audio.save(path.name)
+    path.close()
+
+    class Saved:  # lets build_report keep one code path for the plain and the streaming route
+        filename = path.name
+        def save(self, dest):
+            os.replace(path.name, dest)
+
+    def run():
+        try:
+            events.put({"type": "done", "report": build_report(Saved(), goal, context, turns, video, resume, events.put)})
+        except Exception as e:
+            app.logger.exception("session report stream failed")
+            events.put({"type": "error", "error": f"Backend Error: {e}"})
+        finally:
+            if os.path.exists(path.name):
+                os.remove(path.name)
+            events.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+
+    def lines():
+        while (ev := events.get()) is not None:
+            yield json.dumps(ev) + "\n"
+
+    return Response(lines(), mimetype='application/x-ndjson', headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 def log_run(goal, result, timings):

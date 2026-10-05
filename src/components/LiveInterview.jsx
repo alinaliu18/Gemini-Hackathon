@@ -6,7 +6,7 @@ import '../screens/session.css';
 
 // A spoken mock interview with Gemini Live. The interviewer's questions come from the resume; the candidate's mic is
 // also recorded locally so the whole session can be scored afterwards. Video never leaves the device.
-export default function LiveInterview({ apiBase, goal, contextText, resumeFile, onReport, onBack }) {
+export default function LiveInterview({ apiBase, goal, contextText, resumeFile, onFinish, onBack }) {
   const [status, setStatus] = useState('idle'); // idle | connecting | live | scoring | error
   const [note, setNote] = useState('');
   const [captions, setCaptions] = useState([]);
@@ -104,16 +104,8 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
     fd.append('audio_response', blob, `session.${type.includes('mp4') ? 'm4a' : 'webm'}`);
     fd.append('turns', JSON.stringify(turns));
     if (samples.length) fd.append('video_signals', JSON.stringify(aggregateSignals(samples)));
-    try {
-      const res = await fetch(`${apiBase}/api/session_report`, { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Report failed (${res.status})`);
-      onReport(data, URL.createObjectURL(blob));
-    } catch (e) {
-      setStatus('error');
-      setNote(`${e.message} Your answers were not lost from this page: try "End & get report" again.`);
-      live.current = { session: { stop: () => turns }, recorder, chunks, stopped: Promise.resolve(), retry: true };
-    }
+    // The report screen opens straight away and fills in as the backend streams results (see App.jsx).
+    onFinish(fd, URL.createObjectURL(blob));
   }
 
   const mm = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
@@ -123,7 +115,7 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
   const state = status === 'connecting' || status === 'idle' ? 'connecting'
     : status === 'scoring' ? 'thinking'
     : lastCaption?.role === 'interviewer' ? 'speaking' : 'listening';
-  const stateLabel = { connecting: 'Connecting…', speaking: 'Speaking', listening: 'Listening', thinking: 'Preparing your report' }[state];
+  const stateLabel = { connecting: 'Connecting…', speaking: 'Speaking', listening: 'Listening', thinking: 'Wrapping up' }[state];
   const failed = status === 'error';
 
   return (
@@ -156,7 +148,7 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
         ) : state === 'thinking' ? (
           <div className="call-question">
             <span className="label">Interview finished</span>
-            <p className="q display">Building your report. This takes about a minute.</p>
+            <p className="q display">Saving your recording. Your report opens next.</p>
           </div>
         ) : (
           <div className="call-question">
@@ -184,7 +176,7 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
       )}
 
       <div className="controls">
-        {failed && !live.current.retry ? (
+        {failed ? (
           <>
             <button type="button" className="call-btn" onClick={onBack}>Back</button>
             <button type="button" className="call-btn call-btn-solid" onClick={start}>Try again</button>
@@ -203,9 +195,9 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
             </div>
             <div className="ctrl">
               <button type="button" className="end" disabled={status === 'scoring' || status === 'connecting'} onClick={finish}>
-                {status === 'scoring' ? 'Scoring…' : 'End interview'}
+                {status === 'scoring' ? 'Finishing…' : 'End interview'}
               </button>
-              <span className="ctrl-label">Your report is ready in about a minute</span>
+              <span className="ctrl-label">Your report starts building right away</span>
             </div>
           </>
         )}
