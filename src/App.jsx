@@ -31,31 +31,15 @@ function App() {
       )}
 
       {screen === 'live' && (
-        <>
-          <header className="app-header step-header">
-            <h1>Live Interview</h1>
-            <p className="subtitle">Talk it through like the real thing. Interrupt, ask to repeat, take your time.</p>
-          </header>
-          <main className="app-container">
-            <LiveInterview apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText} resumeFile={resumeFile}
-                           onBack={() => setScreen('setup')}
-                           onReport={(report, audioURL) => { setSession({ report, audioURL }); setScreen('report'); }} />
-          </main>
-        </>
+        <LiveInterview apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText} resumeFile={resumeFile}
+                       onBack={() => setScreen('setup')}
+                       onReport={(report, audioURL) => { setSession({ report, audioURL }); setScreen('report'); }} />
       )}
 
       {screen === 'report' && session && (
-        <>
-          <header className="app-header step-header">
-            <h1>📊 Your Interview Report</h1>
-            <p className="subtitle">Every point links to the moment it is based on</p>
-          </header>
-          <main className="app-container">
-            <SessionReport report={session.report} audioURL={session.audioURL}
-                           onRestart={() => { setSession(null); setScreen('live'); }}
-                           onHome={() => { setSession(null); setScreen('landing'); }} />
-          </main>
-        </>
+        <SessionReport report={session.report} audioURL={session.audioURL}
+                       onRestart={() => { setSession(null); setScreen('setup'); }}
+                       onHome={() => { setSession(null); setScreen('landing'); }} />
       )}
 
       {screen === 'practice' && (

@@ -6,6 +6,12 @@ An interview practice tool with a live voice interviewer. It asks about your res
 
 ![Landing page](docs/screenshots/landing.png)
 
+| Setup | Live interview |
+| --- | --- |
+| ![Setup](docs/screenshots/setup.png) | ![Live interview](docs/screenshots/live.png) |
+
+![Report](docs/screenshots/report.png)
+
 **How a session goes:** open the landing page, add your resume (optional) and pick a track on one setup screen, then talk with the live interviewer. When you end the call you get a report. Practicing a single question is still available from a link on the landing page.
 
 ## Features
@@ -208,9 +214,9 @@ If you fork the repo, update the `base` path in `vite.config.js` and use the cor
 
 - **src/**: React frontend source code.
   - `App.jsx`: Switches between screens (landing, setup, live, report, practice) and holds shared inputs.
-  - `src/screens/`: `Landing.jsx`, `Setup.jsx`, `QuickPractice.jsx`.
-  - `src/components/LiveInterview.jsx` and `SessionReport.jsx`: the live call and the whole-interview report.
-  - `App.css`: Styling. A new white and blue design is specified in `docs/product-polish/` and not wired in yet.
+  - `src/screens/`: `Landing.jsx`, `Setup.jsx`, `QuickPractice.jsx`, with `screens.css` and `session.css`.
+  - `src/components/LiveInterview.jsx` and `SessionReport.jsx`: the live call (starts when the screen opens) and the whole-interview report.
+  - `src/index.css`: Design tokens (white and cobalt blue) and shared buttons. The design is specified in `docs/product-polish/`.
   - `src/signals/`: Browser-side face measurement (`faceSignals.js`, `aggregate.js`).
   - `src/components/EvidenceFeedback.jsx`: Evidence-based feedback display.
 - **pipeline/**: Evaluation pipeline.

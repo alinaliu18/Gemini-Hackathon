@@ -20,7 +20,7 @@ function Evidence({ items, onSeek }) {
   );
 }
 
-export default function EvidenceFeedback({ result, onSeek }) {
+export default function EvidenceFeedback({ result, onSeek, hideImprovements = 0 }) {
   if (!result?.dimensions) return null;
   const coverage = result.score_coverage;
   return (
@@ -44,13 +44,13 @@ export default function EvidenceFeedback({ result, onSeek }) {
         </section>
       )}
 
-      {result.improvements?.length > 0 && (
+      {result.improvements?.length > hideImprovements && (
         <section>
-          <h4>To work on</h4>
-          {result.improvements.map((s, i) => (
+          <h4>{hideImprovements ? 'Also worth a look' : 'To work on'}</h4>
+          {result.improvements.slice(hideImprovements).map((s, i) => (
             <div key={i} className="feedback-item improve">
               <p>{s.text}</p>
-              {s.tip && <p className="tip">Try: {s.tip}</p>}
+              {s.tip && <p className="tip"><b>Try:</b> {s.tip}</p>}
               <Evidence items={s.evidence} onSeek={onSeek} />
             </div>
           ))}

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import EvidenceFeedback from '../components/EvidenceFeedback';
+import { TopBar } from './Landing';
+import './session.css';
 import { createFaceSignalTracker } from '../signals/faceSignals';
 import { aggregateSignals } from '../signals/aggregate';
 
@@ -183,24 +185,21 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
 
   if (evaluation) {
     return (
-      <>
-        <header className="app-header step-header">
-          <h1>📊 Your Results</h1>
-          <p className="subtitle">Here's your personalized feedback</p>
-        </header>
-
-        <main className="app-container">
+      <div className="screen-page">
+        <TopBar onHome={onHome} />
+        <main className="practice">
           <section className="results-section">
+            <div className="practice-title">
+              <h1 className="display">Your feedback</h1>
+              <p>Every point links to the moment it is based on.</p>
+            </div>
             <div className="score-card">
               <div className="score-display">
-                <span className="score-number">{evaluation.score}</span>
-                <span className="score-max">/100</span>
+                <span className="score-number display">{evaluation.score}</span>
+                <span className="score-max">/ 100</span>
               </div>
               <div className="score-bar">
-                <div
-                  className="score-fill"
-                  style={{width: `${evaluation.score}%`}}
-                />
+                <div className="score-fill" style={{width: `${evaluation.score}%`}} />
               </div>
             </div>
 
@@ -224,39 +223,38 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
                 }}
                 className="btn btn-secondary"
               >
-                🔄 Try Again
+                Try again
               </button>
-              <button type="button" onClick={onLive} className="btn btn-live">
-                🎥 Try Live Interview
+              <button type="button" onClick={onLive} className="btn">
+                Try the live interview
               </button>
               <button type="button" onClick={onHome} className="btn btn-secondary">
-                🏠 Back to Home
+                Back to home
               </button>
             </div>
           </section>
         </main>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <header className="app-header step-header">
-        <button className="back-btn" onClick={onHome}>← Back</button>
-        <h1>Quick Practice</h1>
-        <p className="subtitle">Answer the question out loud or type it below</p>
-      </header>
-
-      <main className="app-container">
+    <div className="screen-page">
+      <TopBar onHome={onHome} />
+      <main className="practice">
+        <div className="practice-title">
+          <h1 className="display">Practice one question</h1>
+          <p>Answer out loud or type it. You get feedback in under a minute.</p>
+        </div>
         <section className="question-card">
           <span className="question-label">{resumeFile ? 'Question from your resume' : 'Question'}</span>
           <p className="question-text">{questionLoading ? 'Writing a question…' : (question || 'No question yet.')}</p>
-          <button type="button" className="btn btn-secondary question-new" onClick={fetchQuestion} disabled={questionLoading}>↻ New question</button>
+          <button type="button" className="btn btn-secondary question-new" onClick={fetchQuestion} disabled={questionLoading}>New question</button>
         </section>
         <form className="practice-form" onSubmit={handleSubmit}>
           <div className="response-section">
             <div className="audio-section">
-              <h3>🎤 Record Your Answer</h3>
+              <h3>Say it out loud</h3>
               <div className="camera-panel">
                 <label>
                   <input type="checkbox" checked={cameraOn} disabled={isRecording}
@@ -275,8 +273,8 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
                     onClick={startRecording}
                     className="record-btn"
                   >
-                    <span className="record-icon">●</span>
-                    Start Recording
+                    <span className="record-icon" />
+                    Start recording
                   </button>
                 ) : (
                   <button
@@ -284,8 +282,8 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
                     onClick={stopRecording}
                     className="record-btn recording"
                   >
-                    <span className="stop-icon">■</span>
-                    Stop Recording
+                    <span className="stop-icon" />
+                    Stop recording
                   </button>
                 )}
                 {audioURL && (
@@ -296,12 +294,12 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
               </div>
             </div>
 
-            <div className="or-divider">OR</div>
+            <div className="or-divider">or</div>
 
             <div className="text-section">
-              <h3>✍️ Type Your Answer</h3>
+              <h3>Type it</h3>
               <textarea
-                placeholder="Type your interview response here..."
+                placeholder="Type your answer here."
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 className="response-textarea"
@@ -312,7 +310,7 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
 
           {error && (
             <div className="alert alert-error">
-              ⚠️ {error}
+              {error}
             </div>
           )}
 
@@ -321,10 +319,10 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
             className="btn btn-submit"
             disabled={loading || (!textInput && !audioBlob)}
           >
-            {loading ? '⏳ Analyzing...' : '✨ Get AI Feedback'}
+            {loading ? 'Analyzing…' : 'Get feedback'}
           </button>
         </form>
       </main>
-    </>
+    </div>
   );
 }
