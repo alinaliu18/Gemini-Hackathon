@@ -20,9 +20,11 @@ The report opens as soon as the interview ends and fills in as results arrive. B
 
 ## Features
 - Three tracks: Academic, Career, Social.
-- Resume upload accepts PDF only (the backend reads PDFs).
+- Resume and job description are both required for a live interview. The interviewer's questions come from the resume and are aimed at the posting, so a session missing either one only produces generic questions.
+- Resume upload accepts PDF only (the backend reads PDFs). A PDF with almost no text in it (a scan) is refused with a message instead of being sent to the model as the resume.
+- Job description by link or by paste. Paste a posting URL and the backend reads it; the extracted text lands in the same box so you can check and edit exactly what the interviewer will see. Link reading is best effort: boards that need a login (LinkedIn often does) say so and ask for a paste.
 - Evidence-based feedback: every item cites a timestamp plus a transcript quote or a measured signal.
-- One main path: Landing, then Setup (resume, track, mic and camera check on one screen), then the live interview, then the report.
+- One main path: Landing, then Setup (resume, job description, track, mic and camera check on one screen), then the live interview, then the report.
 - Live interview: a spoken interview with Gemini Live. Questions come from your resume; the interviewer follows up on your answers; you can interrupt it.
 - Whole-interview report: the three most useful fixes first, a timeline linked to the recording, then feedback for each question. It streams in as it is built.
 - Every run is saved locally (see Saved runs).
@@ -58,6 +60,8 @@ Interpreted by Gemini: content, structure (STAR), clarity, presence.
 **Score.** A track-weighted average (Academic / Social / Career weights) over the dimensions that could be measured. If less than 80% of the rubric weight was measurable, the UI shows "Partial score" and lists what was not measured.
 
 **Reliability.** 429 quota errors rotate to the next API key; 503 overload switches to a fallback model. SDK retries are capped so the user is not left waiting minutes. Audio is sent inline (no upload round trip) when under 15 MB.
+
+**Reading a job posting URL.** `POST /api/job_post` takes a URL from the user, so it is deliberately narrow: http(s) only, public addresses only (loopback, private ranges and the cloud metadata address are refused), every redirect hop re-checked, body size capped, and the extracted text capped at 12,000 characters. It prefers the schema.org `JobPosting` block that boards embed for Google, and falls back to the visible text with script, style, nav and footer removed. A result under 200 characters is reported as a failure, because that means a login wall or a JavaScript shell, not a posting. See `pipeline/jobpost.py`.
 
 ## Saved runs
 
@@ -114,6 +118,7 @@ node src/signals/faceSignals.test.mjs
 ./.venv/bin/python tests/test_session.py     # offline: splitting a live session into answers
 ./.venv/bin/python tests/test_session_stream.py   # offline: event order and the top-three-fixes rule
 GEMINI_API_KEY=offline-placeholder ./.venv/bin/python tests/test_store.py   # offline: every run is saved
+GEMINI_API_KEY=offline-placeholder ./.venv/bin/python tests/test_jobpost.py # offline: reading a job posting URL, and the required inputs
 ./.venv/bin/python tests/live_smoke.py       # real Live API: token route -> interview -> follow-ups -> session report
 node src/live/liveSession.test.mjs
 ./.venv/bin/python eval/run_eval.py --selftest   # offline
@@ -129,6 +134,8 @@ Current results:
 ## Known limitations
 
 - Gemini transcription sometimes drops filler words despite instructions, so fillers can be undercounted.
+- Reading a job posting from a link does not work on every board. LinkedIn and some others answer a plain fetch with a login wall or build the page in the browser, and nothing can be extracted. The UI says so and asks for a paste; it has been tested against saved HTML, not against live job boards.
+- The two report screenshots in this README still use a sample report with example data. Replacing them needs one full interview with a real microphone, which this build environment cannot do.
 - "Eye contact" is head pose (facing the camera), not true eye tracking.
 - No human-rated recordings yet, so agreement with human scores (MAE) has not been measured; thresholds and weights in pipeline/config.py are initial assumptions to calibrate.
 - The live interview has only been tested with a simulated mic and camera (this build environment cannot open real devices). Test it with a real mic and headphones before a demo.
@@ -247,12 +254,14 @@ The plan for a public link is the frontend on Vercel and the backend on Google C
   - `interpret.py`: Gemini interpretation and evidence checks.
   - `session.py`: Whole-interview report (splits the recording into answers, runs them in parallel, emits progress events).
   - `store.py`: Saves every run (see Saved runs).
+  - `jobpost.py`: Reads a job posting from a URL (see Reading a job posting URL).
 - **tests/**: Offline and smoke tests.
 - **eval/**: Evaluation runner and fixtures (`eval/README.md`).
 - **backend.py**: Flask server handling AI connectivity.
 - **public/camera.html**: Standalone Live Interview module.
 - **AudioTesting/** & **CamTest/**: Legacy testing modules.
 - **docs/product-polish/**: Product spec, design system, and a clickable design demo for the redesign.
+- **docs/tech-notes.md**: Why streaming, key rotation and the storage design are built this way, with the measured numbers and where each one came from.
 - **docs/screenshots/**: Screenshots used in this README.
 - **data/**: Saved runs and recordings (created on first run, gitignored).
 

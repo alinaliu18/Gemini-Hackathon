@@ -132,6 +132,21 @@
 .meter i.on { background: var(--color-blue); }
 .meter i.on.hot { background: var(--color-warning); }
 
+/* Job description: a link row, then the box holding exactly what the interviewer will read. */
+.jd { display: grid; gap: var(--space-3); }
+.jd-url { display: flex; gap: var(--space-2); }
+.jd-url input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--space-3); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md); background: var(--color-surface); }
+.jd-url input:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 1px; border-color: var(--color-blue); }
+.jd-url .btn { flex: none; }
+.jd-note { font-size: var(--fs-label); line-height: 20px; padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm); }
+.jd-note.is-ok { background: var(--color-success-subtle); color: var(--color-success); }
+.jd-note.is-error { background: var(--color-danger-subtle); color: var(--color-danger); }
+.jd-text { display: grid; gap: var(--space-2); font-size: var(--fs-body-sm); font-weight: 500; color: var(--color-text-secondary); }
+.jd-text textarea { width: 100%; min-height: 150px; padding: var(--space-3); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md); resize: vertical; font-weight: 400; color: var(--color-ink); }
+
 .more { border-top: 1px solid var(--color-border); padding-top: var(--space-4); }
 .more summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-text-secondary); }
 .more summary::-webkit-details-marker { display: none; }
@@ -151,6 +166,8 @@
   .tracks, .devices { grid-template-columns: minmax(0, 1fr); }
   .cam { max-width: 280px; }
   .setup, .topbar { padding-inline: var(--space-4); }
+  .jd-url { flex-wrap: wrap; }
+  .jd-url input, .jd-url .btn { width: 100%; }
 }
 @media (max-width: 520px) {
   .cta-row .btn-lg { width: 100%; }

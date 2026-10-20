@@ -14,12 +14,15 @@ const TRACKS = [
 // The backend only extracts text from PDFs (PyPDF2), so only accept PDFs here.
 const isPdf = (f) => f && /\.pdf$/i.test(f.name);
 
-// One screen before the interview: resume (optional), track, device check, and extra options folded away.
-// Copy follows docs/product-polish/spec.md section 2.2.
-export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
-                                contextText, setContextText, onStart, onBack, onPractice }) {
-  const [skipped, setSkipped] = useState(false);
+// One screen before the interview: resume, job description, track, device check.
+// Resume and job description are both required: the interviewer's questions come from the resume and are
+// aimed at the posting, so an interview without either is a generic one. Copy follows
+// docs/product-polish/spec.md section 2.2.
+export default function Setup({ apiBase, goal, setGoal, resumeFile, setResumeFile,
+                                contextText, setContextText, jobUrl, setJobUrl, onStart, onBack, onPractice }) {
   const pick = (f) => isPdf(f) && setResumeFile(f);
+  const missing = [!resumeFile && 'your resume', !contextText.trim() && 'the job description', !goal && 'a track']
+    .filter(Boolean);
 
   return (
     <div className="screen-page">
@@ -32,8 +35,7 @@ export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
 
         <section className="field">
           <div className="field-head">
-            <h2>Resume <small>Optional</small></h2>
-            {!resumeFile && !skipped && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSkipped(true)}>Skip</button>}
+            <h2>Resume <small>Required</small></h2>
           </div>
           {resumeFile ? (
             <div className="drop is-done">
@@ -41,9 +43,6 @@ export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
               <p><b>{resumeFile.name}</b><small>Ready. The interviewer will ask about it.</small></p>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setResumeFile(null)}>Remove</button>
             </div>
-          ) : skipped ? (
-            <p className="hint">No resume. You'll get general questions for the track you pick.{' '}
-              <button type="button" className="link-btn" onClick={() => setSkipped(false)}>Add resume</button></p>
           ) : (
             <label className="drop" onDragOver={(e) => e.preventDefault()}
                    onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files[0]); }}>
@@ -52,6 +51,12 @@ export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
               <input type="file" accept=".pdf,application/pdf" className="visually-hidden" onChange={(e) => pick(e.target.files[0])} />
             </label>
           )}
+        </section>
+
+        <section className="field">
+          <div className="field-head"><h2>Job description <small>Required</small></h2></div>
+          <JobDescription apiBase={apiBase} text={contextText} setText={setContextText}
+                          url={jobUrl} setUrl={setJobUrl} />
         </section>
 
         <fieldset className="field">
@@ -74,25 +79,72 @@ export default function Setup({ goal, setGoal, resumeFile, setResumeFile,
           <DeviceCheck onPractice={onPractice} />
         </section>
 
-        <details className="more">
-          <summary><svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>More options</summary>
-          <label className="more-field">Notes for the interviewer
-            <textarea rows="4" value={contextText} onChange={(e) => setContextText(e.target.value)}
-                      placeholder="Paste the job description, or anything you want to be asked about." />
-          </label>
-        </details>
-
         <div className="setup-foot">
-          <p>{goal ? 'About 3 questions with follow-ups, 5 to 8 minutes. You can end it any time.' : 'Pick a track to start.'}</p>
+          <p>{missing.length ? `Still needed: ${missing.join(', ')}.`
+                             : 'About 3 questions with follow-ups, 5 to 8 minutes. You can end it any time.'}</p>
           <div>
             <button type="button" className="btn btn-secondary" onClick={onBack}>Back</button>
-            <button type="button" className="btn btn-lg" disabled={!goal} onClick={onStart}>Start interview</button>
+            <button type="button" className="btn btn-lg" disabled={missing.length > 0} onClick={onStart}>Start interview</button>
           </div>
         </div>
       </main>
     </div>
   );
 }
+
+// Two ways to give the interviewer the posting: paste a link and let the backend read it, or paste the text.
+// The fetched text lands in the same box, so the user can see and edit exactly what the interviewer gets.
+// Link reading is best effort. Boards that need a login (LinkedIn often does) answer with a login wall, and
+// the backend says so instead of sending an empty page to the interviewer.
+function JobDescription({ apiBase, text, setText, url, setUrl }) {
+  const [state, setState] = useState('idle'); // idle | reading | read | error
+  const [note, setNote] = useState('');
+
+  async function read() {
+    if (!url.trim() || state === 'reading') return;
+    setState('reading');
+    setNote('');
+    try {
+      const fd = new FormData();
+      fd.append('url', url.trim());
+      const res = await fetch(`${apiBase}/api/job_post`, { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `We could not read that link (${res.status}).`);
+      setText(data.text);
+      setState('read');
+      setNote(`Read ${data.chars.toLocaleString()} characters from ${hostOf(data.url)}. Check it below, and edit it if the page picked up extra text.`);
+    } catch (e) {
+      setState('error');
+      // "Failed to fetch" means the backend is not reachable, not that the link is bad.
+      setNote(e instanceof TypeError ? "Can't reach the backend. Start it with `npm start`, then try again." : e.message);
+    }
+  }
+
+  return (
+    <div className="jd">
+      <div className="jd-url">
+        <input type="url" inputMode="url" value={url} aria-label="Link to the job posting"
+               placeholder="Paste a link to the posting, including LinkedIn"
+               onChange={(e) => { setUrl(e.target.value); setState('idle'); setNote(''); }}
+               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); read(); } }} />
+        <button type="button" className="btn btn-secondary" disabled={!url.trim() || state === 'reading'} onClick={read}>
+          {state === 'reading' ? 'Reading' : 'Read link'}
+        </button>
+      </div>
+      {note && <p className={state === 'error' ? 'jd-note is-error' : 'jd-note is-ok'}>{note}</p>}
+      <label className="jd-text">
+        <span>{state === 'read' ? 'What the interviewer will read' : 'Or paste the job description'}</span>
+        <textarea rows="7" value={text} onChange={(e) => setText(e.target.value)}
+                  placeholder="Paste the responsibilities and requirements. The interviewer aims its questions at this." />
+      </label>
+      <p className="hint">{text.trim()
+        ? `${text.trim().length.toLocaleString()} characters. ${text.trim().length < 200 ? 'Short descriptions give more generic questions.' : 'Long enough for targeted questions.'}`
+        : 'Needed so the interviewer asks about this role instead of asking generic questions.'}</p>
+    </div>
+  );
+}
+
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'that page'; } };
 
 const FileIcon = () => (
   <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M12 17v-6M9.5 13.5 12 11l2.5 2.5" /></svg>

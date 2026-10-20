@@ -17,6 +17,7 @@ function App() {
   const [interviewGoal, setInterviewGoal] = useState('');
   const [resumeFile, setResumeFile] = useState(null);
   const [contextText, setContextText] = useState('');
+  const [jobUrl, setJobUrl] = useState(''); // kept here so going Back from the interview does not lose the link
 
   // The live interview's report: {report, audioURL, progress, streaming, error}. It starts empty and fills in as results stream in.
   const [session, setSession] = useState(null);
@@ -65,8 +66,9 @@ function App() {
       {screen === 'landing' && <Landing onStart={() => setScreen('setup')} onPractice={() => setScreen('practice')} />}
 
       {screen === 'setup' && (
-        <Setup goal={interviewGoal} setGoal={setInterviewGoal} resumeFile={resumeFile} setResumeFile={setResumeFile}
-               contextText={contextText} setContextText={setContextText}
+        <Setup apiBase={API_BASE_URL} goal={interviewGoal} setGoal={setInterviewGoal}
+               resumeFile={resumeFile} setResumeFile={setResumeFile}
+               contextText={contextText} setContextText={setContextText} jobUrl={jobUrl} setJobUrl={setJobUrl}
                onStart={() => setScreen('live')} onBack={() => setScreen('landing')} onPractice={() => setScreen('practice')} />
       )}
 
