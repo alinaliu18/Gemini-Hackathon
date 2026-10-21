@@ -21,6 +21,7 @@ from pipeline.text_metrics import analyze_text
 from pipeline.transcribe import transcribe
 from pipeline.interpret import interpret, mmss
 from pipeline.live import system_instruction, mint_token
+from pipeline import jobpost
 from pipeline.session import session_report
 from pipeline import store
 
@@ -35,6 +36,19 @@ if env_path.exists():
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
+
+
+class InputError(Exception):
+    """Something the user can fix. Answered with 400 and the message is shown in the UI as-is."""
+
+    def __init__(self, message, reason="bad_input"):
+        super().__init__(message)
+        self.reason = reason
+
+
+@app.errorhandler(InputError)
+def on_input_error(e):
+    return jsonify({"error": str(e), "reason": e.reason}), 400
 
 # ---------- Gemini (rotate keys on quota errors, fall back to another model on overload) ----------
 API_KEYS = [k for k in os.environ.get('GEMINI_API_KEYS', '').split(',') if k] or \
@@ -84,10 +98,31 @@ def read_resume():
 
 
 def extract_text_from_pdf(pdf_file):
+    """Text of a PDF resume. Raises InputError instead of returning the error as the resume text, which used to
+    put "Could not read PDF: ..." into the interviewer's prompt."""
     try:
-        return "".join(page.extract_text() or "" for page in PyPDF2.PdfReader(pdf_file).pages)
+        text = "".join(page.extract_text() or "" for page in PyPDF2.PdfReader(pdf_file).pages)
     except Exception as e:
-        return f"Could not read PDF: {e}"
+        raise InputError(f"We could not read that PDF ({e}). Try exporting it again, or use a different file.",
+                         "resume_unreadable")
+    if len(text.strip()) < MIN_RESUME_CHARS:
+        raise InputError("That PDF has almost no text in it, which usually means it is a scan or an image. "
+                         "Export it from a text editor and try again.", "resume_unreadable")
+    return text
+
+
+MIN_RESUME_CHARS = 100  # under this the PDF is a scan or an image, not a resume we can ask questions about
+
+
+def live_inputs():
+    """Resume and job description are both required inputs to the live interview: the interviewer's questions
+    come from the resume and are aimed at the posting. Raises InputError when either is missing."""
+    job = (request.form.get('context_text') or '').strip()
+    if not request.files.get('file'):
+        raise InputError("Add your resume as a PDF. The interviewer asks about what is in it.", "resume_required")
+    if not job:
+        raise InputError("Add the job description. Paste it, or paste a link to the posting.", "job_required")
+    return read_resume(), job
 
 
 NO_AUDIO = {"duration_s": 0, "speech_s": 0, "pauses": [], "long_pause_count": 0,
@@ -175,6 +210,8 @@ def evaluate_interview():
         app.logger.exception("evaluate failed")
         if run_id:
             store.finish_run(run_id, error=e, timings=timings)
+        if isinstance(e, InputError):
+            return jsonify({"score": 0, "evaluation": str(e), "reason": e.reason, "metrics": {}}), 400
         return jsonify({"score": 0, "evaluation": f"Backend Error: {e}", "metrics": {}}), 500
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -207,11 +244,23 @@ def question_route():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/job_post', methods=['POST'])
+def job_post_route():
+    """Read a job posting from a URL so the candidate pastes a link instead of the whole page. The text comes
+    back to the browser and is submitted with the interview like any pasted description, so the user can read
+    and edit what the interviewer will see."""
+    try:
+        return jsonify(jobpost.fetch_job_text(request.form.get('url', '')))
+    except jobpost.JobPostError as e:
+        return jsonify({"error": str(e), "reason": e.reason}), 400
+
+
 @app.route('/api/live/token', methods=['POST'])
 def live_token():
     """Mint a one-use Live API token with the interviewer's instructions (built from the resume) locked in."""
     goal = (request.form.get('goal') or 'Career').strip().capitalize()
-    instruction = system_instruction(goal, read_resume(), request.form.get('context_text', ''))
+    resume, job = live_inputs()
+    instruction = system_instruction(goal, resume, job)
     last = None
     for client in TOKEN_CLIENTS:
         try:
@@ -263,6 +312,8 @@ def session_report_route():
             return jsonify({"error": "No recording uploaded."}), 400
         goal, context, turns, video, resume = report_inputs()
         return jsonify(build_report(audio, goal, context, turns, video, resume))
+    except InputError:
+        raise
     except Exception as e:
         app.logger.exception("session report failed")
         return jsonify({"error": f"Backend Error: {e}"}), 500
