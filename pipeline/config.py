@@ -4,11 +4,14 @@ MODEL_ID = "gemini-2.5-flash"
 FALLBACK_MODELS = ["gemini-flash-latest", "gemini-3.5-flash-lite"]  # tried in order when a model is overloaded (503) or retired (404)
 # Thinking tokens cost seconds. Transcription needs none; the feedback JSON needs only a little. Applies to gemini-2.5 models;
 # the fallback models decide for themselves.
-THINKING_BUDGET = {"transcribe": 0, "interpret": 0}
+THINKING_BUDGET = {"transcribe": 0, "interpret": 0, "followup": 0}
 
 
 def thinking(model, stage):
-    return {"thinking_config": {"thinking_budget": THINKING_BUDGET[stage]}} if model.startswith("gemini-2.5") else {}
+    """None in THINKING_BUDGET means the model's own default, which is how the split timing test (eval/split_timing.py)
+    measures the report with thinking left on."""
+    budget = THINKING_BUDGET[stage]
+    return {"thinking_config": {"thinking_budget": budget}} if budget is not None and model.startswith("gemini-2.5") else {}
 
 
 LIVE_MODEL = "gemini-3.8-live"  # realtime voice interviewer (Live API)
@@ -43,3 +46,8 @@ TRACK_FOCUS = {
     "Social": "Focus on friendliness, conversational flow, ability to connect.",
     "Career": "Focus on professionalism, relevant experience, problem-solving.",
 }
+
+# Follow-up decisions in the live interview (pipeline/followup.py). The interviewer waits for the decision before it speaks,
+# so the timeout is also the longest extra pause a candidate can hear. Past it, the old rule applies: one follow-up per question.
+FOLLOWUP_TIMEOUT_S = 2.0
+MAX_FOLLOWUPS = 2

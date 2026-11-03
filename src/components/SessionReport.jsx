@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import NextPractice from './NextPractice';
 import EvidenceFeedback from './EvidenceFeedback';
 import { TopBar } from '../screens/Landing';
 import '../screens/session.css';
@@ -31,7 +32,7 @@ function Steps({ progress, report, streaming }) {
   );
 }
 
-export default function SessionReport({ report, audioURL, progress = { done: 0, total: 0 }, streaming = false, error = null, onRetry, onRestart, onHome }) {
+export default function SessionReport({ report, audioURL, progress = { done: 0, total: 0 }, streaming = false, error = null, signedIn = true, onSignIn, onRetry, onRestart, onHome, apiBase }) {
   const player = useRef(null);
   const [now, setNow] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -167,6 +168,15 @@ export default function SessionReport({ report, audioURL, progress = { done: 0, 
               {streaming && Array.from({ length: pending }, (_, i) => <div key={`p${i}`} className="skeleton skeleton-row" aria-busy="true" />)}
             </section>
           )}
+
+          {!signedIn && !streaming && s && (
+            <div className="next-needs">
+              <p>This first practice was free. To practice again, create a free account. Your practices are saved to it, so you can see how you improve.</p>
+              <button type="button" className="btn btn-secondary" onClick={onSignIn}>Create account</button>
+            </div>
+          )}
+
+          {!streaming && s && <NextPractice apiBase={apiBase} runId={report.run_id} suggestion={report.next_suggestion} />}
 
           <footer className="doc-end">
             <button type="button" className="btn btn-lg" onClick={onRestart}>Practice again</button>

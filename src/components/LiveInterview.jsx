@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { startLiveSession } from '../live/liveSession';
+import { canSalvage } from '../live/salvage';
+import { createDecider } from '../live/followup';
+import { apiFetch, track } from '../api';
 import { createFaceSignalTracker } from '../signals/faceSignals';
 import { aggregateSignals } from '../signals/aggregate';
 import '../screens/session.css';
 
 // A spoken mock interview with Gemini Live. The interviewer's questions come from the resume; the candidate's mic is
 // also recorded locally so the whole session can be scored afterwards. Video never leaves the device.
-export default function LiveInterview({ apiBase, goal, contextText, resumeFile, onFinish, onBack }) {
-  const [status, setStatus] = useState('idle'); // idle | connecting | live | scoring | error
+export default function LiveInterview({ apiBase, goal, contextText, resumeFile, ageGroup, planId, onFinish, onBack }) {
+  const [status, setStatus] = useState('idle'); // idle | connecting | live | scoring | interrupted | error
   const [note, setNote] = useState('');
   const [captions, setCaptions] = useState([]);
   const [cameraOn, setCameraOn] = useState(true);
@@ -18,6 +21,8 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
   const live = useRef({});
   const alive = useRef(true);
   const started = useRef(false);
+  const salvage = useRef(null); // what was recorded when the connection dropped
+  const lost = useRef(false);
 
   useEffect(() => { captionsRef.current?.scrollTo(0, captionsRef.current.scrollHeight); }, [captions]);
   // Leaving the page mid-interview releases mic and camera. `alive` also stops a start() that is still waiting on a permission prompt.
@@ -29,6 +34,8 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
     const fd = new FormData();
     fd.append('goal', goal || 'career');
     fd.append('context_text', contextText || '');
+    if (ageGroup) fd.append('age_group', ageGroup);
+    if (planId) fd.append('plan_id', planId);
     if (resumeFile) fd.append('file', resumeFile);
     return fd;
   };
@@ -46,8 +53,9 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
 
   async function start() {
     setStatus('connecting'); setNote(''); setCaptions([]); setElapsed(0); setMuted(false);
+    salvage.current = null; lost.current = false;
     try {
-      const res = await fetch(`${apiBase}/api/live/token`, { method: 'POST', body: form() });
+      const res = await apiFetch(apiBase, '/api/live/token', { method: 'POST', body: form() });
       const { token, model, error } = await res.json();
       if (!res.ok) throw new Error(error || `Token request failed (${res.status})`);
       if (!alive.current) return;
@@ -73,11 +81,22 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
       l.session = await startLiveSession({
         token, model, stream,
         onCaptions: setCaptions,
-        onStatus: (s, detail) => { if (s === 'error') { setStatus('error'); setNote(detail); } else if (detail) setNote(detail); },
-        onInterviewDone: () => finish(),
+        onStatus: (s, detail) => { if (s === 'error') connectionLost(detail); else if (detail) setNote(detail); },
+        onInterviewDone: () => finish('interviewer_done'),
+        onToolCall: createDecider({
+          ask: async (mainQuestion, answer, asked) => {
+            const r = await apiFetch(apiBase, '/api/followup', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ main_question: mainQuestion, answer, followups_asked: asked }),
+            });
+            return r.ok ? r.json() : null;
+          },
+          onTimeout: (asked) => track(apiBase, 'followup_timeout', { asked }),
+        }),
       });
       if (!alive.current) { cleanup(); return; }
       setStatus('live'); setMuted(false);
+      track(apiBase, 'interview_started', { kind: 'live' });
       l.timer = setInterval(() => setElapsed(Math.round(l.session.clock())), 1000);
     } catch (e) {
       cleanup();
@@ -93,19 +112,56 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
     setMuted(next);
   }
 
-  async function finish() {
+  async function finish(how = 'ended_by_user') {
     if (!live.current.session) return;
     setStatus('scoring');
-    const { turns, samples, recorder, chunks, stopped } = cleanup();
-    await stopped;
+    track(apiBase, 'answer_finished', { kind: 'live', how });
+    const kept = cleanup();
+    await kept.stopped;
+    send(kept);
+  }
+
+  // The report screen opens straight away and fills in as the backend streams results (see App.jsx).
+  function send({ turns, samples, recorder, chunks }) {
     const type = recorder.mimeType || 'audio/webm';
     const blob = new Blob(chunks, { type });
     const fd = form();
     fd.append('audio_response', blob, `session.${type.includes('mp4') ? 'm4a' : 'webm'}`);
     fd.append('turns', JSON.stringify(turns));
     if (samples.length) fd.append('video_signals', JSON.stringify(aggregateSignals(samples)));
-    // The report screen opens straight away and fills in as the backend streams results (see App.jsx).
     onFinish(fd, URL.createObjectURL(blob));
+  }
+
+  // The live connection dropped. If a real exchange was already recorded, keep it and offer the report instead of
+  // throwing the practice away; otherwise this is a plain error.
+  async function connectionLost(detail) {
+    if (lost.current) return;
+    lost.current = true;
+    const l = live.current;
+    if (!l.session) { setStatus('error'); setNote(detail); return; } // dropped before the interview began
+    const seconds = l.session.clock();
+    const kept = cleanup();
+    track(apiBase, 'connection_lost', { seconds: Math.round(seconds) });
+    await kept.stopped;
+    const bytes = kept.chunks.reduce((n, c) => n + c.size, 0);
+    if (!alive.current) return;
+    if (canSalvage({ turns: kept.turns, seconds, bytes })) {
+      salvage.current = kept;
+      setStatus('interrupted');
+      setNote('The connection to the interviewer dropped. Your answers so far are saved on this device, so you can still get a report for them.');
+    } else {
+      setStatus('error');
+      setNote(detail);
+    }
+  }
+
+  function reportFromSalvage() {
+    const kept = salvage.current;
+    if (!kept) return;
+    salvage.current = null;
+    setStatus('scoring');
+    track(apiBase, 'report_from_partial', {});
+    send(kept);
   }
 
   const mm = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
@@ -113,9 +169,10 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
   const lastInterviewer = [...captions].reverse().find((c) => c.role === 'interviewer');
   // State shown on the stage: what the interviewer is doing right now.
   const state = status === 'connecting' || status === 'idle' ? 'connecting'
+    : status === 'interrupted' ? 'lost'
     : status === 'scoring' ? 'thinking'
     : lastCaption?.role === 'interviewer' ? 'speaking' : 'listening';
-  const stateLabel = { connecting: 'Connecting…', speaking: 'Speaking', listening: 'Listening', thinking: 'Wrapping up' }[state];
+  const stateLabel = { connecting: 'Connecting…', speaking: 'Speaking', listening: 'Listening', thinking: 'Wrapping up', lost: 'Disconnected' }[state];
   const failed = status === 'error';
 
   return (
@@ -138,6 +195,11 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
           <div className="call-question">
             <span className="label">Something went wrong</span>
             <p className="q display">{note || 'The connection was interrupted.'}</p>
+          </div>
+        ) : state === 'lost' ? (
+          <div className="call-question">
+            <span className="label">Connection lost</span>
+            <p className="q display">{note}</p>
           </div>
         ) : state === 'connecting' ? (
           <div className="call-question">
@@ -181,6 +243,11 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
             <button type="button" className="call-btn" onClick={onBack}>Back</button>
             <button type="button" className="call-btn call-btn-solid" onClick={start}>Try again</button>
           </>
+        ) : state === 'lost' ? (
+          <>
+            <button type="button" className="call-btn" onClick={start}>Start over</button>
+            <button type="button" className="call-btn call-btn-solid" onClick={reportFromSalvage}>Get my report</button>
+          </>
         ) : (
           <>
             <div className="ctrl">
@@ -194,7 +261,7 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
               <span className="ctrl-label">{muted ? 'Unmute' : 'Mute'}</span>
             </div>
             <div className="ctrl">
-              <button type="button" className="end" disabled={status === 'scoring' || status === 'connecting'} onClick={finish}>
+              <button type="button" className="end" disabled={status === 'scoring' || status === 'connecting'} onClick={() => finish()}>
                 {status === 'scoring' ? 'Finishing…' : 'End interview'}
               </button>
               <span className="ctrl-label">Your report starts building right away</span>
@@ -202,7 +269,7 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
           </>
         )}
       </div>
-      {!failed && note && <p className="call-note">{note}</p>}
+      {!failed && state !== 'lost' && note && <p className="call-note">{note}</p>}
     </div>
   );
 }

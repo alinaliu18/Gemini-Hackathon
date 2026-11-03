@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TopBar } from './Landing';
+import { apiFetch, track } from '../api';
+import { countWords, jobTooShort, MIN_JD_WORDS } from '../jobWords';
 import './screens.css';
 
 const TRACKS = [
@@ -11,25 +13,46 @@ const TRACKS = [
     icon: 'M4 5h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM19.5 9H20a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1v2.5L16 18h-4' },
 ];
 
+// What the interviewer does with this: pitches the difficulty and the kind of examples to the level. Optional.
+const LEVELS = [
+  ['middle_school', 'Middle school'], ['high_school', 'High school'], ['college', 'College'],
+  ['early_career', 'Early career'], ['mid_career', 'Mid career'], ['senior_career', 'Senior'],
+];
+
 // The backend only extracts text from PDFs (PyPDF2), so only accept PDFs here.
 const isPdf = (f) => f && /\.pdf$/i.test(f.name);
 
-// One screen before the interview: resume, job description, track, device check.
+// One screen before the interview or the one-question practice: resume, job description, track, level, and (for the
+// interview) a device check.
 // Resume and job description are both required: the interviewer's questions come from the resume and are
 // aimed at the posting, so an interview without either is a generic one. Copy follows
 // docs/product-polish/spec.md section 2.2.
-export default function Setup({ apiBase, goal, setGoal, resumeFile, setResumeFile,
-                                contextText, setContextText, jobUrl, setJobUrl, onStart, onBack, onPractice }) {
-  const pick = (f) => isPdf(f) && setResumeFile(f);
-  const missing = [!resumeFile && 'your resume', !contextText.trim() && 'the job description', !goal && 'a track']
-    .filter(Boolean);
+export default function Setup({ apiBase, mode = 'live', goal, setGoal, resumeFile, setResumeFile, ageGroup, setAgeGroup,
+                                contextText, setContextText, jobUrl, setJobUrl, plan, onStart, onBack, onPractice }) {
+  const practice = mode === 'practice';
+  const [fromLink, setFromLink] = useState(false);
+  const pick = (f) => {
+    if (!isPdf(f)) return;
+    setResumeFile(f);
+    track(apiBase, 'resume_uploaded', {}, { once: true });
+  };
+  const words = countWords(contextText);
+  const jobLongEnough = words >= MIN_JD_WORDS;
+  useEffect(() => {
+    if (jobLongEnough) track(apiBase, 'job_description_filled', { source: fromLink ? 'link' : 'paste' }, { once: true });
+  }, [jobLongEnough]); // eslint-disable-line react-hooks/exhaustive-deps
+  const missing = [!resumeFile && 'your resume',
+                   !contextText.trim() && 'the job description',
+                   contextText.trim() && !jobLongEnough && `a longer job description (${words} of ${MIN_JD_WORDS} words)`,
+                   !goal && 'a track'].filter(Boolean);
 
   return (
     <div className="screen-page">
       <TopBar onHome={onBack} />
       <main className="setup">
         <div className="setup-title">
-          <h1 className="display">Set up your session</h1>
+          <h1 className="display">{practice ? 'Set up your practice' : 'Set up your session'}</h1>
+          {plan && <p className="plan-banner">Planned practice: the first question focuses on {plan.how}.</p>}
           <p>Takes under a minute. Nothing is recorded until you start.</p>
         </div>
 
@@ -56,7 +79,7 @@ export default function Setup({ apiBase, goal, setGoal, resumeFile, setResumeFil
         <section className="field">
           <div className="field-head"><h2>Job description <small>Required</small></h2></div>
           <JobDescription apiBase={apiBase} text={contextText} setText={setContextText}
-                          url={jobUrl} setUrl={setJobUrl} />
+                          url={jobUrl} setUrl={setJobUrl} onRead={() => setFromLink(true)} />
         </section>
 
         <fieldset className="field">
@@ -75,16 +98,28 @@ export default function Setup({ apiBase, goal, setGoal, resumeFile, setResumeFil
         </fieldset>
 
         <section className="field">
-          <div className="field-head"><h2>Mic and camera</h2></div>
-          <DeviceCheck onPractice={onPractice} />
+          <div className="field-head"><h2>Your level <small>Optional</small></h2></div>
+          <select className="select" aria-label="Your level" value={ageGroup} onChange={(e) => setAgeGroup(e.target.value)}>
+            <option value="">Not set</option>
+            {LEVELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <p className="hint">The interviewer pitches the difficulty of its questions to this level.</p>
         </section>
+
+        {!practice && (
+          <section className="field">
+            <div className="field-head"><h2>Mic and camera</h2></div>
+            <DeviceCheck onPractice={onPractice} />
+          </section>
+        )}
 
         <div className="setup-foot">
           <p>{missing.length ? `Still needed: ${missing.join(', ')}.`
-                             : 'About 3 questions with follow-ups, 5 to 8 minutes. You can end it any time.'}</p>
+                             : practice ? 'One question, answered out loud or typed. Feedback in under a minute.'
+                                        : 'About 3 questions with follow-ups, 5 to 8 minutes. You can end it any time.'}</p>
           <div>
             <button type="button" className="btn btn-secondary" onClick={onBack}>Back</button>
-            <button type="button" className="btn btn-lg" disabled={missing.length > 0} onClick={onStart}>Start interview</button>
+            <button type="button" className="btn btn-lg" disabled={missing.length > 0} onClick={onStart}>{practice ? 'Start practice' : 'Start interview'}</button>
           </div>
         </div>
       </main>
@@ -96,9 +131,11 @@ export default function Setup({ apiBase, goal, setGoal, resumeFile, setResumeFil
 // The fetched text lands in the same box, so the user can see and edit exactly what the interviewer gets.
 // Link reading is best effort. Boards that need a login (LinkedIn often does) answer with a login wall, and
 // the backend says so instead of sending an empty page to the interviewer.
-function JobDescription({ apiBase, text, setText, url, setUrl }) {
+function JobDescription({ apiBase, text, setText, url, setUrl, onRead }) {
   const [state, setState] = useState('idle'); // idle | reading | read | error
   const [note, setNote] = useState('');
+  const [touched, setTouched] = useState(false); // the "too short" warning waits until the person leaves the box
+  const words = countWords(text);
 
   async function read() {
     if (!url.trim() || state === 'reading') return;
@@ -107,10 +144,11 @@ function JobDescription({ apiBase, text, setText, url, setUrl }) {
     try {
       const fd = new FormData();
       fd.append('url', url.trim());
-      const res = await fetch(`${apiBase}/api/job_post`, { method: 'POST', body: fd });
+      const res = await apiFetch(apiBase, '/api/job_post', { method: 'POST', body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `We could not read that link (${res.status}).`);
       setText(data.text);
+      onRead?.();
       setState('read');
       setNote(`Read ${data.chars.toLocaleString()} characters from ${hostOf(data.url)}. Check it below, and edit it if the page picked up extra text.`);
     } catch (e) {
@@ -134,12 +172,15 @@ function JobDescription({ apiBase, text, setText, url, setUrl }) {
       {note && <p className={state === 'error' ? 'jd-note is-error' : 'jd-note is-ok'}>{note}</p>}
       <label className="jd-text">
         <span>{state === 'read' ? 'What the interviewer will read' : 'Or paste the job description'}</span>
-        <textarea rows="7" value={text} onChange={(e) => setText(e.target.value)}
+        <textarea rows="7" value={text} onChange={(e) => setText(e.target.value)} onBlur={() => setTouched(true)}
+                  aria-describedby="jd-count"
                   placeholder="Paste the responsibilities and requirements. The interviewer aims its questions at this." />
       </label>
-      <p className="hint">{text.trim()
-        ? `${text.trim().length.toLocaleString()} characters. ${text.trim().length < 200 ? 'Short descriptions give more generic questions.' : 'Long enough for targeted questions.'}`
-        : 'Needed so the interviewer asks about this role instead of asking generic questions.'}</p>
+      {touched && text.trim() && words < MIN_JD_WORDS
+        ? <p id="jd-count" className="jd-note is-error">{jobTooShort(text)}</p>
+        : <p id="jd-count" className="hint">{words
+            ? `${words} words. ${words < MIN_JD_WORDS ? `At least ${MIN_JD_WORDS} are needed so the interviewer can aim its questions.` : 'Long enough for targeted questions.'}`
+            : `Needed so the interviewer asks about this role instead of asking generic questions. At least ${MIN_JD_WORDS} words.`}</p>}
     </div>
   );
 }

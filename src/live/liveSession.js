@@ -47,10 +47,12 @@ export function pcm16ToFloat(b64) {
 
 /**
  * Start a live interview on an existing mic stream.
- * onCaptions(list of {role: 'interviewer'|'candidate', text}), onStatus('live'|'ended'|'error', detail), onInterviewDone()
+ * onCaptions(list of {role: 'interviewer'|'candidate', text}), onStatus('live'|'ended'|'error', detail), onInterviewDone(),
+ * onToolCall({name, args}, captions) -> Promise of the tool's result. The interviewer calls decide_next_step after every
+ * answer and waits for the result before it speaks (pipeline/live.py), so the promise must always settle.
  * Returns { clock() -> seconds since start, stop() -> turns }.
  */
-export async function startLiveSession({ token, model, stream, onCaptions, onStatus, onInterviewDone }) {
+export async function startLiveSession({ token, model, stream, onCaptions, onStatus, onInterviewDone, onToolCall }) {
   const ctx = new AudioContext();
   await ctx.resume();
   const t0 = ctx.currentTime;
@@ -94,6 +96,7 @@ export async function startLiveSession({ token, model, stream, onCaptions, onSta
 
   ws.onmessage = async (ev) => {
     const msg = JSON.parse(typeof ev.data === 'string' ? ev.data : await ev.data.text());
+    if (msg.toolCall) answerToolCalls(msg.toolCall.functionCalls || []);
     const sc = msg.serverContent;
     if (msg.goAway) onStatus?.('live', 'The session is about to time out; wrap up soon.');
     if (!sc) return;
@@ -126,6 +129,16 @@ export async function startLiveSession({ token, model, stream, onCaptions, onSta
     }
     if (sc.turnComplete) finishTurn(false);
   };
+  async function answerToolCalls(calls) {
+    const functionResponses = await Promise.all(calls.map(async (fc) => {
+      let response;
+      try { response = onToolCall ? await onToolCall({ name: fc.name, args: fc.args || {} }, captions.map((c) => ({ ...c }))) : {}; }
+      catch { response = {}; }
+      return { id: fc.id, name: fc.name, response };
+    }));
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ toolResponse: { functionResponses } }));
+  }
+
   ws.onclose = (e) => { if (!closed) onStatus?.('error', `Live connection closed: ${e.reason || e.code}`); };
 
   // mic -> 16-bit PCM chunks -> Live API
