@@ -22,6 +22,12 @@ MAX_REDIRECTS = 3
 TIMEOUT_S = 10
 UA = "InterviewMaestro/1.0 (job posting reader)"
 
+# Services on Google Cloud have public addresses, so the check for private addresses does not stop a link that points at
+# one of them. When this backend runs on Cloud Run, a link to another Cloud Run service in the same project would reach
+# it with this service's network position. Job boards are never hosted at these names.
+BLOCKED_SUFFIXES = (".run.app", ".cloudfunctions.net", ".appspot.com", ".googleusercontent.com", ".internal", ".local",
+                    ".localhost")
+
 # Tags whose text is never part of a posting.
 DROP = {"script", "style", "noscript", "template", "svg", "head", "nav", "footer", "header", "form", "button", "select"}
 BLOCK = {"p", "div", "li", "br", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "ul", "ol", "td"}
@@ -117,6 +123,9 @@ def safe_url(url, resolve=None):
     parts = urlparse(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise JobPostError("That does not look like a web address. Paste a link starting with https://", "bad_url")
+    host = parts.hostname.lower().rstrip(".")
+    if host == "localhost" or host.endswith(BLOCKED_SUFFIXES):
+        raise JobPostError("That address is not reachable from the internet, so we cannot read it.", "blocked_host")
     try:
         infos = (resolve or socket.getaddrinfo)(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80),
                                                 proto=socket.IPPROTO_TCP)

@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import EvidenceFeedback from '../components/EvidenceFeedback';
 import { TopBar } from './Landing';
+import { apiFetch, track } from '../api';
 import './session.css';
 import { createFaceSignalTracker } from '../signals/faceSignals';
 import { aggregateSignals } from '../signals/aggregate';
 
 // Secondary path: one question, answered by voice or text, scored with the same evidence pipeline.
 // Reached only from the landing page's "Practice one question" link.
-export default function QuickPractice({ apiBase, goal, contextText, resumeFile, onHome, onLive }) {
+export default function QuickPractice({ apiBase, goal, contextText, resumeFile, ageGroup, onHome, onLive }) {
   const [textInput, setTextInput] = useState('');
 
   const [isRecording, setIsRecording] = useState(false);
@@ -111,12 +112,14 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
       form.append('goal', goal);
       form.append('context_text', contextText);
       form.append('avoid', asked.join(' | '));
+      if (ageGroup) form.append('age_group', ageGroup);
       if (resumeFile) form.append('file', resumeFile);
-      const res = await fetch(`${apiBase}/api/question`, { method: 'POST', body: form });
+      const res = await apiFetch(apiBase, '/api/question', { method: 'POST', body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Question failed (${res.status})`);
       setQuestion(data.question);
       setAsked((a) => [...a, data.question]);
+      track(apiBase, 'interview_started', { kind: 'practice' }, { once: true });
     } catch (e) {
       setError(e instanceof TypeError ? "Can't reach the backend. Start it with `npm start`, then try again." : e.message);
     } finally {
@@ -140,6 +143,7 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
     setLoading(true);
     setError(null);
     setEvaluation(null);
+    track(apiBase, 'answer_finished', { kind: 'practice', how: audioBlob ? 'spoken' : 'typed' });
 
     try {
       const formData = new FormData();
@@ -148,6 +152,7 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
       formData.append('text_input', textInput);
       formData.append('context_text', contextText);
       formData.append('question', question || contextText);
+      if (ageGroup) formData.append('age_group', ageGroup);
       if (videoSignals) formData.append('video_signals', JSON.stringify(videoSignals));
 
       if (resumeFile) {
@@ -159,7 +164,7 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
         formData.append('audio_response', audioBlob, `answer.${ext}`);
       }
 
-      const response = await fetch(`${apiBase}/api/evaluate`, {
+      const response = await apiFetch(apiBase, '/api/evaluate', {
         method: 'POST',
         body: formData,
         headers: {
@@ -168,16 +173,17 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.evaluation || `Server error: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.evaluation || `Server error: ${response.status}`);
       }
 
       const data = await response.json();
       setEvaluation(data);
+      track(apiBase, 'report_viewed', { kind: 'practice' });
 
     } catch (err) {
       console.error('Submission error:', err);
-      setError(`Failed to evaluate: ${err.message}`);
+      setError(err instanceof TypeError ? "Can't reach the backend. Start it with `npm start`, then try again." : err.message);
     } finally {
       setLoading(false);
     }

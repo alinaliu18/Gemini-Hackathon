@@ -3,6 +3,7 @@ so the browser talks to Gemini Live directly without ever seeing the API key."""
 import datetime
 
 from . import config
+from .inputs import level_line
 
 INSTRUCTION = """You are a {track} interviewer running a live, spoken mock interview. Be warm but rigorous, like a good hiring manager.
 
@@ -11,6 +12,9 @@ CANDIDATE RESUME (may be empty):
 
 EXTRA CONTEXT FROM THE CANDIDATE (job description, target role, questions they want; may be empty):
 {context}
+
+ABOUT THE CANDIDATE
+{level}
 
 HOW TO RUN THE INTERVIEW
 1. Open with one short sentence of greeting, then ask your first question right away.
@@ -30,9 +34,12 @@ RULES
 - Speak English unless the candidate speaks another language."""
 
 
-def system_instruction(goal, resume, context, n_main=3):
+def system_instruction(goal, resume, context, n_main=3, age_group=None):
+    level = level_line(age_group)
     return INSTRUCTION.format(track=goal.lower(), resume=(resume or "").strip()[:6000] or "(none)",
-                              context=(context or "").strip()[:3000] or "(none)", n_main=n_main)
+                              context=(context or "").strip()[:3000] or "(none)", n_main=n_main,
+                              level=f"The candidate is {level}. Pitch the difficulty of your questions and the kind of examples "
+                                    "you expect to that level." if level else "(level not given)")
 
 
 def live_config(instruction):

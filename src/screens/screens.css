@@ -147,6 +147,10 @@
 .jd-text textarea { width: 100%; min-height: 150px; padding: var(--space-3); border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md); resize: vertical; font-weight: 400; color: var(--color-ink); }
 
+.select { height: 44px; max-width: 280px; padding: 0 var(--space-3); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-ink); }
+.select:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 1px; border-color: var(--color-blue); }
+
 .more { border-top: 1px solid var(--color-border); padding-top: var(--space-4); }
 .more summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-text-secondary); }
 .more summary::-webkit-details-marker { display: none; }
@@ -176,3 +180,22 @@
   .setup-foot .btn-lg { flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .wave i { animation: none; } }
+
+/* Sign-in dialog, shown over the current screen when the free practice is used up. */
+.auth-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: var(--space-4);
+  background: rgba(11, 18, 32, 0.55); }
+.auth-card { width: 100%; max-width: 420px; display: grid; gap: var(--space-4); padding: var(--space-6);
+  background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
+.auth-card h2 { font-size: var(--fs-display-m); line-height: 1.1; }
+.auth-lead { color: var(--color-text-secondary); line-height: 24px; }
+.auth-field { display: grid; gap: var(--space-2); font-weight: 500; font-size: var(--fs-body-sm); }
+.auth-field input { height: 44px; padding: 0 var(--space-3); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-ink); font-weight: 400; }
+.auth-field input:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 1px; border-color: var(--color-blue); }
+.auth-switch { color: var(--color-text-secondary); font-size: var(--fs-label); }
+.auth-close { justify-self: start; }
+
+/* A quiet line on the report after the free practice: what the next practice needs. */
+.next-needs { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-tint); color: var(--color-text-secondary); }
+.next-needs p { max-width: 56ch; line-height: 22px; }

@@ -31,7 +31,7 @@ function Steps({ progress, report, streaming }) {
   );
 }
 
-export default function SessionReport({ report, audioURL, progress = { done: 0, total: 0 }, streaming = false, error = null, onRetry, onRestart, onHome }) {
+export default function SessionReport({ report, audioURL, progress = { done: 0, total: 0 }, streaming = false, error = null, signedIn = true, onSignIn, onRetry, onRestart, onHome }) {
   const player = useRef(null);
   const [now, setNow] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -166,6 +166,13 @@ export default function SessionReport({ report, audioURL, progress = { done: 0, 
               ))}
               {streaming && Array.from({ length: pending }, (_, i) => <div key={`p${i}`} className="skeleton skeleton-row" aria-busy="true" />)}
             </section>
+          )}
+
+          {!signedIn && !streaming && s && (
+            <div className="next-needs">
+              <p>This first practice was free. To practice again, create a free account. Your practices are saved to it, so you can see how you improve.</p>
+              <button type="button" className="btn btn-secondary" onClick={onSignIn}>Create account</button>
+            </div>
           )}
 
           <footer className="doc-end">

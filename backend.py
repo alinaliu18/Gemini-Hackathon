@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import PyPDF2
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, g
 from flask_cors import CORS
 from google import genai
 from google.genai import types
@@ -21,7 +21,7 @@ from pipeline.text_metrics import analyze_text
 from pipeline.transcribe import transcribe
 from pipeline.interpret import interpret, mmss
 from pipeline.live import system_instruction, mint_token
-from pipeline import jobpost
+from pipeline import accounts, analytics, inputs, jobpost, limits
 from pipeline.session import session_report
 from pipeline import store
 
@@ -35,7 +35,8 @@ if env_path.exists():
             os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
+CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"],
+                                 "allow_headers": ["Content-Type", "Authorization", "X-Visitor-Id"]}})
 
 
 class InputError(Exception):
@@ -46,9 +47,41 @@ class InputError(Exception):
         self.reason = reason
 
 
+class LoginRequired(InputError):
+    """The free practice is used up. Answered with 401 so the UI opens the sign-in screen."""
+
+
 @app.errorhandler(InputError)
 def on_input_error(e):
+    return jsonify({"error": str(e), "reason": e.reason}), 401 if isinstance(e, LoginRequired) else 400
+
+
+@app.errorhandler(accounts.AccountError)
+def on_account_error(e):
     return jsonify({"error": str(e), "reason": e.reason}), 400
+
+
+@app.errorhandler(limits.LimitError)
+def on_limit(e):
+    return jsonify({"error": str(e), "reason": e.reason}), 429
+
+
+def identity():
+    """Who is asking: (visitor id the browser keeps, user id if signed in). Both can be None."""
+    bearer = request.headers.get("Authorization", "")
+    user = accounts.user_from_token(bearer[7:] if bearer.startswith("Bearer ") else None)
+    return accounts.clean_visitor(request.headers.get("X-Visitor-Id")), user
+
+
+def client_ip():
+    return limits.client_ip(request.remote_addr, request.headers.get("X-Forwarded-For"))
+
+
+def require_account_after_first_practice():
+    """The first practice is free. After one has finished, the next needs an account."""
+    visitor, user = identity()
+    if accounts.needs_login(visitor, user):
+        raise LoginRequired(accounts.LOGIN_REQUIRED, "login_required")
 
 # ---------- Gemini (rotate keys on quota errors, fall back to another model on overload) ----------
 API_KEYS = [k for k in os.environ.get('GEMINI_API_KEYS', '').split(',') if k] or \
@@ -93,8 +126,10 @@ def save_and_measure(audio, timings):
 
 
 def read_resume():
-    f = request.files.get('file')
-    return extract_text_from_pdf(io.BytesIO(f.read())) if f else ""
+    if not hasattr(g, 'resume'):  # an uploaded file can be read once, and a route may ask for the resume twice
+        f = request.files.get('file')
+        g.resume = extract_text_from_pdf(io.BytesIO(f.read())) if f else ""
+    return g.resume
 
 
 def extract_text_from_pdf(pdf_file):
@@ -114,14 +149,18 @@ def extract_text_from_pdf(pdf_file):
 MIN_RESUME_CHARS = 100  # under this the PDF is a scan or an image, not a resume we can ask questions about
 
 
-def live_inputs():
-    """Resume and job description are both required inputs to the live interview: the interviewer's questions
-    come from the resume and are aimed at the posting. Raises InputError when either is missing."""
+def required_inputs():
+    """Resume and job description are both required for every practice, the live interview and Quick Practice: the
+    questions come from the resume and are aimed at the posting. The description must be long enough to aim at.
+    Raises InputError when either is missing or too short."""
     job = (request.form.get('context_text') or '').strip()
     if not request.files.get('file'):
         raise InputError("Add your resume as a PDF. The interviewer asks about what is in it.", "resume_required")
     if not job:
         raise InputError("Add the job description. Paste it, or paste a link to the posting.", "job_required")
+    too_short = inputs.job_too_short(job)
+    if too_short:
+        raise InputError(too_short, "job_too_short")
     return read_resume(), job
 
 
@@ -156,6 +195,10 @@ def health_check():
 def evaluate_interview():
     if request.method == 'OPTIONS':
         return '', 200
+    resume, _job = required_inputs()
+    require_account_after_first_practice()
+    limits.take('practice', client_ip())
+    visitor_id, user_id = identity()
     temp_path = None
     run_id = None
     timings = {}
@@ -167,12 +210,11 @@ def evaluate_interview():
         audio = request.files.get('audio_response')
         video = json.loads(request.form['video_signals']) if request.form.get('video_signals') else None
 
-        resume = read_resume() or "No resume provided."
-
         if audio:
             temp_path, audio_m = save_and_measure(audio, timings)
         run_id = store.start_run('practice', goal, request.form.get('context_text'), resume, question, typed, video=video,
-                                 audio_src=temp_path, audio_mime=audio.mimetype if audio else None)  # input saved before any model call
+                                 audio_src=temp_path, audio_mime=audio.mimetype if audio else None,
+                                 visitor_id=visitor_id, user_id=user_id)  # input saved before any model call
         if audio:
             t = time.time()
             segments, timings['transcribe_model'] = with_client(
@@ -221,10 +263,11 @@ def evaluate_interview():
 QUESTION_PROMPT = """You are a {track} interviewer preparing one question for a mock interview.
 Resume (may be empty):
 {resume}
-Context from the candidate (may be empty): {context}
+Job description: {context}
+About the candidate: {level}
 Write ONE interview question. It must name a specific item from the resume (a project, job, number or skill) and ask what
-the candidate decided and why, or how they handled a trade-off or setback. If the resume is empty, use the context; if both
-are empty, ask a common {track} question. Do not repeat any of these: {avoid}
+the candidate decided and why, or how they handled a trade-off or setback, and it should matter for the job described.
+Do not repeat any of these: {avoid}
 Return only the question, one or two sentences."""
 
 
@@ -232,8 +275,11 @@ Return only the question, one or two sentences."""
 def question_route():
     """One resume-based question for Quick Practice."""
     goal = (request.form.get('goal') or 'Career').strip().capitalize()
-    prompt = QUESTION_PROMPT.format(track=goal.lower(), resume=(read_resume() or "(none)")[:6000],
-                                    context=request.form.get('context_text', '') or "(none)",
+    resume, job = required_inputs()
+    require_account_after_first_practice()
+    level = inputs.level_line(request.form.get('age_group'))
+    prompt = QUESTION_PROMPT.format(track=goal.lower(), resume=resume[:6000], context=job[:3000],
+                                    level=f"The candidate is {level}. Pitch the question to that level." if level else "(not given)",
                                     avoid=request.form.get('avoid', '') or "(none)")
     try:
         text, _ = with_client(lambda c, m: c.models.generate_content(model=m, contents=prompt,
@@ -244,11 +290,53 @@ def question_route():
         return jsonify({"error": str(e)}), 500
 
 
+def _json():
+    return request.get_json(silent=True) or {}
+
+
+@app.route('/api/auth/signup', methods=['POST'])
+def signup_route():
+    limits.take('auth', client_ip())
+    body = _json()
+    return jsonify(accounts.signup(body.get('email'), body.get('password'), identity()[0]))
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login_route():
+    limits.take('auth', client_ip())  # also slows down guessing passwords
+    body = _json()
+    return jsonify(accounts.login(body.get('email'), body.get('password'), identity()[0]))
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def me_route():
+    user = identity()[1]
+    email = accounts.email_of(user) if user else None
+    return jsonify({"email": email}) if email else (jsonify({"error": "Not signed in."}), 401)
+
+
+@app.route('/api/event', methods=['POST'])
+def event_route():
+    """One product event from the browser, for the funnel. Counted per IP so it cannot be used to fill the database."""
+    body = _json()
+    try:
+        limits.take('event', client_ip())
+        visitor, user = identity()
+        if visitor or user:
+            analytics.record(str(body.get('name', '')), visitor, user, body.get('props') if isinstance(body.get('props'), dict) else {})
+    except limits.LimitError:
+        pass  # a busy browser is not an error worth showing anyone
+    except ValueError:
+        return jsonify({"error": "Unknown event."}), 400
+    return '', 204
+
+
 @app.route('/api/job_post', methods=['POST'])
 def job_post_route():
     """Read a job posting from a URL so the candidate pastes a link instead of the whole page. The text comes
     back to the browser and is submitted with the interview like any pasted description, so the user can read
     and edit what the interviewer will see."""
+    limits.take('jobpost', client_ip())
     try:
         return jsonify(jobpost.fetch_job_text(request.form.get('url', '')))
     except jobpost.JobPostError as e:
@@ -259,8 +347,11 @@ def job_post_route():
 def live_token():
     """Mint a one-use Live API token with the interviewer's instructions (built from the resume) locked in."""
     goal = (request.form.get('goal') or 'Career').strip().capitalize()
-    resume, job = live_inputs()
-    instruction = system_instruction(goal, resume, job)
+    resume, job = required_inputs()
+    require_account_after_first_practice()
+    ip = client_ip()
+    limits.take('live', ip)
+    instruction = system_instruction(goal, resume, job, age_group=request.form.get('age_group'))
     last = None
     for client in TOKEN_CLIENTS:
         try:
@@ -270,17 +361,20 @@ def live_token():
                 last = e
                 continue
             app.logger.exception("token failed")
+            limits.give_back('live', ip)  # no interview began, so it does not use up a daily practice
             return jsonify({"error": str(e)}), 500
+    limits.give_back('live', ip)
     return jsonify({"error": str(last)}), 429
 
 
-def build_report(audio, goal, context, turns, video, resume, emit=None):
+def build_report(audio, goal, context, turns, video, resume, emit=None, who=(None, None)):
     """Run the whole-interview pipeline on an uploaded recording. Returns the finished report dict."""
     timings = {}
     t0 = time.time()
     temp_path, audio_m = save_and_measure(audio, timings)
     run_id = store.start_run('live', goal, context, resume, turns=turns, video=video, audio_src=temp_path,
-                             audio_mime=getattr(audio, 'mimetype', None))  # the input is saved before any model call
+                             audio_mime=getattr(audio, 'mimetype', None),
+                             visitor_id=who[0], user_id=who[1])  # the input is saved before any model call
     try:
         report = session_report(with_client, goal, context, resume, temp_path, turns, audio_m, video, analyze_text, emit)
     except Exception as e:
@@ -310,8 +404,9 @@ def session_report_route():
         audio = request.files.get('audio_response')
         if not audio:
             return jsonify({"error": "No recording uploaded."}), 400
+        limits.take('report', client_ip())
         goal, context, turns, video, resume = report_inputs()
-        return jsonify(build_report(audio, goal, context, turns, video, resume))
+        return jsonify(build_report(audio, goal, context, turns, video, resume, who=identity()))
     except InputError:
         raise
     except Exception as e:
@@ -326,10 +421,13 @@ def session_report_stream_route():
     audio = request.files.get('audio_response')
     if not audio:
         return jsonify({"error": "No recording uploaded."}), 400
+    limits.take('report', client_ip())
     try:
         goal, context, turns, video, resume = report_inputs()
     except Exception as e:
+        limits.give_back('report', client_ip())
         return jsonify({"error": f"Bad request: {e}"}), 400
+    who = identity()  # read here: the request is gone by the time the thread runs
     events = queue.Queue()
     # Save the upload before the response starts: the request's files are gone once the view returns.
     path = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio.filename or '')[1] or '.webm')
@@ -343,7 +441,7 @@ def session_report_stream_route():
 
     def run():
         try:
-            events.put({"type": "done", "report": build_report(Saved(), goal, context, turns, video, resume, events.put)})
+            events.put({"type": "done", "report": build_report(Saved(), goal, context, turns, video, resume, events.put, who)})
         except Exception as e:
             app.logger.exception("session report stream failed")
             events.put({"type": "error", "error": f"Backend Error: {e}"})

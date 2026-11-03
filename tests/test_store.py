@@ -50,9 +50,13 @@ os.environ.pop("STORE_AUDIO")
 # 4) Quick Practice, typed answer
 backend.with_client = lambda fn: (({"score": 70, "dimensions": {}, "strengths": [], "improvements": [], "dropped": [],
                                     "score_coverage": 1, "not_measured": []}), "m")
-r = client.post("/api/evaluate", data={"goal": "career", "question": "Why this role?", "text_input": "Because I like users."},
+JOB = ("Product intern. You will talk to users, write short specs with engineers, and run small experiments to learn what "
+       "to build next. We want someone curious who can explain a decision clearly.")
+r = client.post("/api/evaluate", data={"goal": "career", "question": "Why this role?", "text_input": "Because I like users.",
+                                       "context_text": JOB, "file": (open(ROOT / "tests/fixtures/resume.pdf", "rb"), "resume.pdf")},
                 content_type="multipart/form-data")
 assert r.status_code == 200, r.get_data(as_text=True)
 p = rows()[-1]
+assert p["context_text"] == JOB and p["resume_text"], "the resume and the job description are saved with the practice"
 assert p["kind"] == "practice" and p["question"] == "Why this role?" and p["typed_text"] == "Because I like users." and p["status"] == "ok" and p["score"] == 70, dict(p)
 print("runs saved:", len(rows()), "| ALL OK")
