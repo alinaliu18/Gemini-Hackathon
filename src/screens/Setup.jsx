@@ -28,7 +28,7 @@ const isPdf = (f) => f && /\.pdf$/i.test(f.name);
 // aimed at the posting, so an interview without either is a generic one. Copy follows
 // docs/product-polish/spec.md section 2.2.
 export default function Setup({ apiBase, mode = 'live', goal, setGoal, resumeFile, setResumeFile, ageGroup, setAgeGroup,
-                                contextText, setContextText, jobUrl, setJobUrl, onStart, onBack, onPractice }) {
+                                contextText, setContextText, jobUrl, setJobUrl, plan, onStart, onBack, onPractice }) {
   const practice = mode === 'practice';
   const [fromLink, setFromLink] = useState(false);
   const pick = (f) => {
@@ -52,6 +52,7 @@ export default function Setup({ apiBase, mode = 'live', goal, setGoal, resumeFil
       <main className="setup">
         <div className="setup-title">
           <h1 className="display">{practice ? 'Set up your practice' : 'Set up your session'}</h1>
+          {plan && <p className="plan-banner">Planned practice: the first question focuses on {plan.how}.</p>}
           <p>Takes under a minute. Nothing is recorded until you start.</p>
         </div>
 

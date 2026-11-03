@@ -29,6 +29,7 @@ LIMITS = {
     "jobpost": (30, "GLOBAL_JOBPOST_CAP", 1000),
     "auth": (60, "GLOBAL_AUTH_CAP", 2000),       # a campus shares a few addresses, so this is generous
     "event": (5000, "GLOBAL_EVENT_CAP", 200000),
+    "followup": (400, "GLOBAL_FOLLOWUP_CAP", 10000),  # about 9 per interview, each one a text model call
 }
 PRACTICES = ("live", "practice", "report")
 

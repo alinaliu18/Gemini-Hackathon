@@ -57,6 +57,25 @@ OTHER_TABLES = (
         kind TEXT NOT NULL,           -- 'live', 'practice' or 'report'
         n INTEGER NOT NULL,
         PRIMARY KEY (day, bucket, kind))""",
+    """CREATE TABLE IF NOT EXISTS followup_decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        visitor_id TEXT,
+        user_id TEXT,
+        asked INTEGER,                -- follow-ups already asked on this main question
+        answer_words INTEGER,         -- how long the answer was; the answer itself is not kept here
+        action TEXT,                  -- 'follow_up' or 'next'
+        missing TEXT,                 -- 'own_action', 'result_number', 'example' or empty
+        source TEXT,                  -- 'model', 'cap', 'timeout_fallback', 'error_fallback' or 'browser_timeout'
+        ms INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS plans (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        run_id TEXT,                  -- the practice whose report suggested this one
+        visitor_id TEXT,
+        user_id TEXT,
+        dimension TEXT NOT NULL,      -- the weakest scored dimension of that report
+        starts_at TEXT)""",
 )
 
 
@@ -92,6 +111,31 @@ def start_run(kind, goal=None, context_text=None, resume_text=None, question=Non
                    (run_id, datetime.now().isoformat(timespec="seconds"), kind, "running", goal, context_text, resume_text,
                     question, typed_text, _dumps(turns), _dumps(video), audio_rel, audio_mime, visitor_id, user_id))
     return run_id
+
+
+def log_decision(visitor_id, user_id, asked, answer_words, d):
+    with _connect() as db:
+        db.execute("INSERT INTO followup_decisions (at, visitor_id, user_id, asked, answer_words, action, missing, source, ms)"
+                   " VALUES (?,?,?,?,?,?,?,?,?)", (datetime.now().isoformat(timespec="seconds"), visitor_id, user_id, asked,
+                                                  answer_words, d.get("action"), d.get("missing") or "", d.get("source"), d.get("ms")))
+
+
+def save_plan(plan_id, run_id, who, dimension, starts_at):
+    with _connect() as db:
+        db.execute("INSERT INTO plans (id, created_at, run_id, visitor_id, user_id, dimension, starts_at) VALUES (?,?,?,?,?,?,?)",
+                   (plan_id, datetime.now().isoformat(timespec="seconds"), run_id, who[0], who[1], dimension, starts_at))
+
+
+def get_plan(plan_id):
+    with _connect() as db:
+        db.row_factory = sqlite3.Row
+        return db.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+
+
+def get_run(run_id):
+    with _connect() as db:
+        db.row_factory = sqlite3.Row
+        return db.execute("SELECT id, status, report_json, visitor_id, user_id FROM runs WHERE id=?", (run_id,)).fetchone()
 
 
 def finish_run(run_id, report=None, error=None, timings=None):

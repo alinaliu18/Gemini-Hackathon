@@ -15,7 +15,15 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5002';
 // same resume and job description first, so it goes through Setup when they are not filled in yet.
 function App() {
   // #setup opens Setup directly (handy for screenshots and sharing); every other screen needs state from earlier ones.
-  const [screen, setScreen] = useState(() => (window.location.hash === '#setup' ? 'setup' : 'landing')); // landing | setup | live | report | practice
+  const planParam = new URLSearchParams(window.location.search).get('plan');
+  const [screen, setScreen] = useState(() => (window.location.hash === '#setup' || planParam ? 'setup' : 'landing')); // landing | setup | live | report | practice
+  // A practice opened from a calendar invite: its first question is aimed at the weak spot from the last report.
+  const [plan, setPlan] = useState(null);
+  useEffect(() => {
+    if (!planParam) return;
+    apiFetch(API_BASE_URL, `/api/plan/${encodeURIComponent(planParam)}`).then((r) => (r.ok ? r.json() : null))
+      .then((p) => { if (p) { setPlan(p); track(API_BASE_URL, 'plan_opened', { focus: p.label }); } }).catch(() => {});
+  }, [planParam]);
 
   // Shared inputs: Setup fills them, the live interview and Quick Practice send them to the backend.
   const [interviewGoal, setInterviewGoal] = useState('');
@@ -97,20 +105,20 @@ function App() {
       {screen === 'setup' && (
         <Setup apiBase={API_BASE_URL} mode={setupMode} goal={interviewGoal} setGoal={setInterviewGoal}
                resumeFile={resumeFile} setResumeFile={setResumeFile} ageGroup={ageGroup} setAgeGroup={setAgeGroup}
-               contextText={contextText} setContextText={setContextText} jobUrl={jobUrl} setJobUrl={setJobUrl}
+               contextText={contextText} setContextText={setContextText} jobUrl={jobUrl} setJobUrl={setJobUrl} plan={plan}
                onStart={() => setScreen(setupMode === 'practice' ? 'practice' : 'live')} onBack={() => setScreen('landing')}
                onPractice={() => (inputsReady ? setScreen('practice') : setSetupMode('practice'))} />
       )}
 
       {screen === 'live' && (
-        <LiveInterview apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText} resumeFile={resumeFile} ageGroup={ageGroup}
+        <LiveInterview apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText} resumeFile={resumeFile} ageGroup={ageGroup} planId={plan?.plan_id}
                        onBack={() => setScreen('setup')} onFinish={startReport} />
       )}
 
       {screen === 'report' && session && (
         <SessionReport report={session.report} audioURL={session.audioURL} progress={session.progress}
                        streaming={session.streaming} error={session.error}
-                       signedIn={!!user} onSignIn={() => setAuth({ message: null })}
+                       apiBase={API_BASE_URL} signedIn={!!user} onSignIn={() => setAuth({ message: null })}
                        onRetry={() => startReport(run.current.form, run.current.audioURL)}
                        onRestart={() => { run.current.id++; setSession(null); setScreen('setup'); }}
                        onHome={() => { run.current.id++; setSession(null); setScreen('landing'); }} />
@@ -118,7 +126,7 @@ function App() {
 
       {screen === 'practice' && (
         <QuickPractice apiBase={API_BASE_URL} goal={interviewGoal} contextText={contextText} ageGroup={ageGroup}
-                       resumeFile={resumeFile} onHome={() => setScreen('landing')} onLive={() => openSetup('live')} />
+                       resumeFile={resumeFile} planId={plan?.plan_id} onHome={() => setScreen('landing')} onLive={() => openSetup('live')} />
       )}
 
       {auth && (

@@ -52,14 +52,17 @@ def answer_audio(audio_m, segs):
             "pauses": pauses, "long_pause_count": sum(p["duration"] >= config.LONG_PAUSE_S for p in pauses)}
 
 
-def session_report(call, goal, context, resume, audio_path, turns, audio_m, video, analyze_text, emit=None):
+def session_report(call, goal, context, resume, audio_path, turns, audio_m, video, analyze_text, emit=None, pipelined=True):
     """`call(fn)` runs fn(client, model) with key/model fallback and returns (result, model).
     Returns {"summary", "answers", "segments"}; every timestamp is relative to the start of the recording.
 
     Each answer is transcribed and then interpreted on its own thread, so feedback for a short answer does not wait for
     the slowest transcription. The overall summary waits only for the transcripts. `emit(event)` is told about progress:
     {"type": "stage", "total"}, {"type": "transcribed", "done", "total"}, {"type": "answer", "index", "answer"},
-    {"type": "summary", "summary"}. Without `emit` the function just returns the finished report."""
+    {"type": "summary", "summary"}. Without `emit` the function just returns the finished report.
+
+    pipelined=False puts back the stage barrier from before 887a9bf: no answer is scored until every answer is transcribed.
+    Only the split timing test (eval/split_timing.py) turns it off."""
     emit = emit or (lambda event: None)
     windows = [w for w in answer_windows(questions_from_turns(turns), audio_m["duration_s"]) if w[2] - w[1] >= 1.0]
     emit({"type": "stage", "stage": "transcribing", "total": len(windows)})
@@ -90,6 +93,9 @@ def session_report(call, goal, context, resume, audio_path, turns, audio_m, vide
         with lock:
             done["n"] += 1
             emit({"type": "transcribed", "done": done["n"], "total": len(windows)})
+        if not pipelined:
+            for t in transcripts:
+                t.exception()  # waits until every answer is transcribed
         if a is None:
             return None
         res = per_answer(a)

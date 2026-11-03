@@ -75,10 +75,12 @@ Every run is saved so nothing is lost, even when a model call fails: the input i
 
 ## Report speed
 
-The report for a whole interview used to take 30 to 60 seconds. Three changes:
-- Thinking is off for transcription and the feedback JSON (`THINKING_BUDGET` in `pipeline/config.py`). On one synthetic 3-answer interview this took the report from 29.5 s to 9 to 15 s.
-- Each answer is transcribed and then scored on its own thread; the overall summary waits only for the transcripts.
+The report for a whole interview used to take 30 to 60 seconds. Commit 887a9bf shipped three changes together:
+- Thinking is off for transcription and the feedback JSON (`THINKING_BUDGET` in `pipeline/config.py`).
+- No stage barrier. Transcription and scoring were already parallel before; what changed is that each answer is scored as soon as its own transcript is ready, instead of after every answer is transcribed. The overall summary waits only for the transcripts.
 - `/api/session_report/stream` sends the report as it is built, one JSON object per line: `stage`, `transcribed`, `answer`, `summary`, then `done` with the full report (or `error`). The report page opens immediately and fills in as results arrive.
+
+Together they took one synthetic 3-answer interview from 29.5 s to 9 to 15 s. That drop was measured with all three changes at once, so it cannot be credited to any one of them. `eval/split_timing.py` measures each change on its own (total time and time to the first answer's feedback); its results go in `docs/tech-notes.md` once it has been run with a key.
 
 Gemini's own latency varies a lot from run to run. `tests/test_session_stream.py` checks the event order and the pipelining offline.
 
@@ -106,6 +108,16 @@ gemini-3.8-live was chosen for the fastest follow-up. Across 6 runs of gemini-3.
 
 **Limits.** Audio-only Live sessions are capped at 15 minutes and a connection at about 10 minutes (no session resumption yet), so keep interviews under 10 minutes. Without headphones the interviewer's voice can leak into the mic; echo cancellation is on and leaked interviewer speech is filtered from the report by timing, but headphones are recommended. Video is never sent to Gemini: it stays on the device (this also keeps the session on the 15-minute audio-only limit instead of 2 minutes for audio+video).
 
+## Follow-ups and the next practice
+
+**Follow-ups decided per answer.** The interviewer no longer asks exactly one follow-up after every answer. After each answer it calls a tool, `decide_next_step`, and waits for the result before it speaks. The browser relays the call to `/api/followup`, where a text model (`pipeline/followup.py`) says which of three things the answer lacks: a specific example, what the candidate did themselves, or a number for the result. Missing one means a follow-up about the first missing one, in that order; missing none means the next question. At most 2 follow-ups per main question, counted in the browser and capped again on the server.
+
+Why a tool: the interviewer starts talking 0.4 to 0.8 s after it decides an answer is over (it answered 2.9 to 3.3 s after an answer ended, with 2.5 s of silence needed). A decision pushed from the backend would have to fit a model call and two network hops into that gap and would land while the interviewer is already speaking. With a tool, the interviewer waits. The cost is that the decision time is added to the pause the candidate hears, so it has a 2 s timeout on the server and 3 s in the browser. Past it, the old rule applies (one follow-up per question) and the timeout is recorded in `followup_decisions` and as a `followup_timeout` event. How long decisions take with a real key has not been measured yet: `eval/run_followup_eval.py --model` prints the median.
+
+**Next practice.** Each report suggests practicing its lowest scored dimension next. Nothing is created unless the person agrees; then `/api/next_session` saves a plan and returns a calendar invite (`.ics`) whose link (`PUBLIC_APP_URL/?plan=...`) opens Setup with the first question aimed at that dimension, for the live interviewer and for Quick Practice.
+
+**Eval set.** `eval/followup_cases.jsonl` has 45 answers labelled with what is missing (`eval/make_followup_cases.py` writes it). The labels were written by the developer, not by an interviewer, and need a second person's review before they are treated as truth.
+
 ## Testing and evaluation
 
 ```bash
@@ -119,6 +131,12 @@ node src/signals/faceSignals.test.mjs
 ./.venv/bin/python tests/test_session_stream.py   # offline: event order and the top-three-fixes rule
 GEMINI_API_KEY=offline-placeholder ./.venv/bin/python tests/test_store.py   # offline: every run is saved
 GEMINI_API_KEY=offline-placeholder ./.venv/bin/python tests/test_jobpost.py # offline: reading a job posting URL, and the required inputs
+GEMINI_API_KEY=offline-placeholder ./.venv/bin/python tests/test_agent.py   # offline: follow-up decisions, timeouts, next practice plans
+GEMINI_API_KEY=offline-placeholder ./.venv/bin/python tests/test_launch_readiness.py   # offline: inputs, accounts, limits, events
+node src/live/followup.test.mjs
+./.venv/bin/python eval/run_followup_eval.py --rules     # offline keyword baseline on the 45 follow-up cases
+./.venv/bin/python eval/run_followup_eval.py --model     # real decider, 45 calls; see the free-tier note
+./.venv/bin/python eval/split_timing.py --config each    # real calls, 28 per round; see its docstring
 ./.venv/bin/python tests/live_smoke.py       # real Live API: token route -> interview -> follow-ups -> session report
 node src/live/liveSession.test.mjs
 ./.venv/bin/python eval/run_eval.py --selftest   # offline
@@ -141,7 +159,7 @@ Current results:
 - The live interview has only been tested with a simulated mic and camera (this build environment cannot open real devices). Test it with a real mic and headphones before a demo.
 - Safari may block audio that starts after the network calls; tested in Chrome only.
 - Long thinking pauses (over 2.5 s) can make the interviewer start talking; it stops when you continue.
-- Speed depends on Gemini's load. A whole-interview report took 32-64 s before the speed changes. After turning thinking off it took 9-40 s on a synthetic 3-answer interview, and the page shows results as they arrive.
+- Speed depends on Gemini's load. A whole-interview report took 32-64 s before the speed changes. After the three changes in 887a9bf it took 9-40 s on a synthetic 3-answer interview, and the page shows results as they arrive.
 - The free Gemini tier allows about 20 requests per day per model per key (one report takes about 7), so a shared link needs a paid key.
 - Saved runs include recordings and resume text; add a consent notice and a retention rule before opening this to other people.
 - The streamed report page was tested against a mock server and with a real live session, but not yet with a full real-microphone interview followed by a real report.

@@ -15,3 +15,8 @@ eval/data/
 eval_log.csv
 # saved runs: inputs, outputs and recordings of real people never go in git
 /data/
+
+# follow-up eval runs keep their own decision log
+eval/.followup_store/
+eval/.split_store/
+eval/split_timing_mock.csv

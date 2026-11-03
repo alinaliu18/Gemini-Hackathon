@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import NextPractice from '../components/NextPractice';
 import EvidenceFeedback from '../components/EvidenceFeedback';
 import { TopBar } from './Landing';
 import { apiFetch, track } from '../api';
@@ -8,7 +9,7 @@ import { aggregateSignals } from '../signals/aggregate';
 
 // Secondary path: one question, answered by voice or text, scored with the same evidence pipeline.
 // Reached only from the landing page's "Practice one question" link.
-export default function QuickPractice({ apiBase, goal, contextText, resumeFile, ageGroup, onHome, onLive }) {
+export default function QuickPractice({ apiBase, goal, contextText, resumeFile, ageGroup, planId, onHome, onLive }) {
   const [textInput, setTextInput] = useState('');
 
   const [isRecording, setIsRecording] = useState(false);
@@ -113,6 +114,7 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
       form.append('context_text', contextText);
       form.append('avoid', asked.join(' | '));
       if (ageGroup) form.append('age_group', ageGroup);
+      if (planId) form.append('plan_id', planId); // the backend aims only the first question at the plan
       if (resumeFile) form.append('file', resumeFile);
       const res = await apiFetch(apiBase, '/api/question', { method: 'POST', body: form });
       const data = await res.json();
@@ -174,6 +176,8 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        // The sign-in dialog already explains this one (api.js), so it is not repeated as an error under the form.
+        if (errorData.reason === 'login_required') return;
         throw new Error(errorData.error || errorData.evaluation || `Server error: ${response.status}`);
       }
 
@@ -216,6 +220,8 @@ export default function QuickPractice({ apiBase, goal, contextText, resumeFile, 
             )}
 
             <EvidenceFeedback result={evaluation} onSeek={seekTo} />
+
+            <NextPractice apiBase={apiBase} runId={evaluation.run_id} suggestion={evaluation.next_suggestion} />
 
             <div className="result-actions">
               <button

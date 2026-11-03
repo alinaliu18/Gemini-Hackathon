@@ -39,9 +39,9 @@
 为什么这样写。先说你负责什么，再说队友负责什么，然后测试的结果带到修复方式。「filtering emotion words out of the model output」比「fixing 2 scoring errors」具体，而且这是个有观点的决定，模型不该猜情绪。
 
 **第 3 条，你自己重建整个应用**
-> Rebuilt the entire app on my own with AI coding tools, a Gemini Live voice interviewer, a Flask scoring pipeline and a streamed React report. Cut the report wait from 29.5 seconds to 9 to 15 seconds on the same test interview by turning model thinking off, scoring each answer on its own thread, and streaming each result as it finished.
+> Rebuilt the entire app on my own with AI coding tools, a Gemini Live voice interviewer, a Flask scoring pipeline and a streamed React report. Cut the report wait from 29.5 seconds to 9 to 15 seconds on the same test interview by turning model thinking off, scoring each answer as soon as its own transcript was ready, and streaming each result as it finished.
 
-为什么这样写。「Rebuilt the design」听起来像改界面，实际你重建的是整个应用,前端后端都在内，所以写 entire app 并把三块列出来。数字换成同一组测试的 29.5 秒到 9 到 15 秒，这样经得起追问。
+为什么这样写。「Rebuilt the design」听起来像改界面，实际你重建的是整个应用,前端后端都在内，所以写 entire app 并把三块列出来。数字换成同一组测试的 29.5 秒到 9 到 15 秒，这样经得起追问。注意这个数是 3 件事一起改的结果，拆开测试见 `docs/tech-notes.md` 第 5 节，测完再决定这条写哪一件。
 
 **第 4 条，等 A 和 B 做完再填**
 > Shipped at [链接]. [N] students ran [M] practice interviews in [几周], and [一个结果数字].

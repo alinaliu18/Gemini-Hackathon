@@ -21,7 +21,7 @@ from pipeline.text_metrics import analyze_text
 from pipeline.transcribe import transcribe
 from pipeline.interpret import interpret, mmss
 from pipeline.live import system_instruction, mint_token
-from pipeline import accounts, analytics, inputs, jobpost, limits
+from pipeline import accounts, analytics, followup, inputs, jobpost, limits, nextplan
 from pipeline.session import session_report
 from pipeline import store
 
@@ -245,6 +245,7 @@ def evaluate_interview():
                        "signals": {"audio": audio_m, "text": text_m, "video": video},
                        "timings": timings})
         result.update(legacy_view(result))
+        result.update({"run_id": run_id, "next_suggestion": nextplan.suggestion(result)})
         log_run(goal, result, timings)
         store.finish_run(run_id, report=result, timings=timings)
         return jsonify(result)
@@ -278,9 +279,12 @@ def question_route():
     resume, job = required_inputs()
     require_account_after_first_practice()
     level = inputs.level_line(request.form.get('age_group'))
+    plan = nextplan.get(request.form.get('plan_id', '')) if request.form.get('plan_id') and not request.form.get('avoid') else None
     prompt = QUESTION_PROMPT.format(track=goal.lower(), resume=resume[:6000], context=job[:3000],
                                     level=f"The candidate is {level}. Pitch the question to that level." if level else "(not given)",
                                     avoid=request.form.get('avoid', '') or "(none)")
+    if plan:  # only the first question of a planned practice
+        prompt += f"\nThe question must give the candidate a direct chance to practice {plan['how']}."
     try:
         text, _ = with_client(lambda c, m: c.models.generate_content(model=m, contents=prompt,
                                                                      config={"temperature": 0.9}).text)
@@ -331,6 +335,35 @@ def event_route():
     return '', 204
 
 
+@app.route('/api/followup', methods=['POST'])
+def followup_route():
+    """The live interviewer's decide_next_step tool, relayed by the browser: follow up on what is missing, or move on.
+    Always answers 200 with a decision, because the interviewer is waiting on it; failures fall back inside decide()."""
+    limits.take('followup', client_ip())
+    body = _json()
+    return jsonify(followup.decide(with_client, str(body.get('main_question', ''))[:600], str(body.get('answer', ''))[:4000],
+                                   body.get('followups_asked') or 0, who=identity()))
+
+
+@app.route('/api/next_session', methods=['POST'])
+def next_session_route():
+    """The person agreed to the suggested next practice: save the plan and return the calendar invite and the link."""
+    body = _json()
+    try:
+        out = nextplan.accept(str(body.get('run_id', '')), body.get('starts_at'), identity())
+    except nextplan.PlanError as e:
+        return jsonify({"error": str(e)}), e.status
+    visitor, user = identity()
+    analytics.record('next_session_agreed', visitor, user, {"focus": out["label"]})
+    return jsonify(out)
+
+
+@app.route('/api/plan/<plan_id>', methods=['GET'])
+def plan_route(plan_id):
+    plan = nextplan.get(plan_id[:40])
+    return jsonify(plan) if plan else (jsonify({"error": "That practice link has expired or is wrong."}), 404)
+
+
 @app.route('/api/job_post', methods=['POST'])
 def job_post_route():
     """Read a job posting from a URL so the candidate pastes a link instead of the whole page. The text comes
@@ -351,7 +384,9 @@ def live_token():
     require_account_after_first_practice()
     ip = client_ip()
     limits.take('live', ip)
-    instruction = system_instruction(goal, resume, job, age_group=request.form.get('age_group'))
+    plan = nextplan.get(request.form.get('plan_id', '')) if request.form.get('plan_id') else None
+    instruction = system_instruction(goal, resume, job, age_group=request.form.get('age_group'),
+                                     plan_line=nextplan.first_question_line(plan))
     last = None
     for client in TOKEN_CLIENTS:
         try:
@@ -386,6 +421,7 @@ def build_report(audio, goal, context, turns, video, resume, emit=None, who=(Non
     timings['total_ms'] = int((time.time() - t0) * 1000)
     report.update({"transcript": [{**s, "t": mmss(s["start"])} for s in report.pop("segments")], "turns": turns,
                    "signals": {"audio": audio_m, "video": video}, "timings": timings, "run_id": run_id})
+    report["next_suggestion"] = nextplan.suggestion(report)
     store.finish_run(run_id, report=report, timings=timings)
     return report
 

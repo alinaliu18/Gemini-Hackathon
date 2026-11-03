@@ -29,7 +29,8 @@ FUNNEL = [
     ("next_session_agreed", "Agreed to a suggested next practice"),
     ("second_practice_started", "Came back and started a second practice"),
 ]
-OTHER_EVENTS = ("login_prompted", "account_created", "connection_lost", "report_from_partial")
+OTHER_EVENTS = ("login_prompted", "account_created", "connection_lost", "report_from_partial", "followup_timeout",
+                "plan_opened")
 SENT_BY_BROWSER = {name for name, _ in FUNNEL if name != "second_practice_started"} | set(OTHER_EVENTS)
 
 ABANDONED_AFTER = timedelta(minutes=60)  # a run still "running" this long after it began is counted as not finished

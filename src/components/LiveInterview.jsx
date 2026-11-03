@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { startLiveSession } from '../live/liveSession';
 import { canSalvage } from '../live/salvage';
+import { createDecider } from '../live/followup';
 import { apiFetch, track } from '../api';
 import { createFaceSignalTracker } from '../signals/faceSignals';
 import { aggregateSignals } from '../signals/aggregate';
@@ -8,7 +9,7 @@ import '../screens/session.css';
 
 // A spoken mock interview with Gemini Live. The interviewer's questions come from the resume; the candidate's mic is
 // also recorded locally so the whole session can be scored afterwards. Video never leaves the device.
-export default function LiveInterview({ apiBase, goal, contextText, resumeFile, ageGroup, onFinish, onBack }) {
+export default function LiveInterview({ apiBase, goal, contextText, resumeFile, ageGroup, planId, onFinish, onBack }) {
   const [status, setStatus] = useState('idle'); // idle | connecting | live | scoring | interrupted | error
   const [note, setNote] = useState('');
   const [captions, setCaptions] = useState([]);
@@ -34,6 +35,7 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
     fd.append('goal', goal || 'career');
     fd.append('context_text', contextText || '');
     if (ageGroup) fd.append('age_group', ageGroup);
+    if (planId) fd.append('plan_id', planId);
     if (resumeFile) fd.append('file', resumeFile);
     return fd;
   };
@@ -81,6 +83,16 @@ export default function LiveInterview({ apiBase, goal, contextText, resumeFile, 
         onCaptions: setCaptions,
         onStatus: (s, detail) => { if (s === 'error') connectionLost(detail); else if (detail) setNote(detail); },
         onInterviewDone: () => finish('interviewer_done'),
+        onToolCall: createDecider({
+          ask: async (mainQuestion, answer, asked) => {
+            const r = await apiFetch(apiBase, '/api/followup', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ main_question: mainQuestion, answer, followups_asked: asked }),
+            });
+            return r.ok ? r.json() : null;
+          },
+          onTimeout: (asked) => track(apiBase, 'followup_timeout', { asked }),
+        }),
       });
       if (!alive.current) { cleanup(); return; }
       setStatus('live'); setMuted(false);
